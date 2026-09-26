@@ -23,6 +23,12 @@ local cases = {
   { 'missing constructor closer', 'def broken() -> T: C{1', 'def broken() -> T: C{1}' },
   { 'missing list closer', 'def broken() -> T: [1, 2', 'def broken() -> T: [1, 2]' },
   { 'unfinished lambda', 'def broken() -> T: x =>', 'def broken() -> T: x => x' },
+  { 'missing closing quote', 'def broken() -> String: "unfinished', 'def broken() -> String: "unfinished"' },
+  { 'missing opening quote', 'def broken() -> String: text"', 'def broken() -> String: "text"' },
+  { 'invalid escape', 'def broken() -> String: "\\q"', 'def broken() -> String: "\\n"' },
+  { 'unfinished escape', 'def broken() -> String: "text\\', 'def broken() -> String: "text\\n"' },
+  { 'multiline closing quote', 'def broken() -> String: "first\nsecond', 'def broken() -> String: "first\nsecond"' },
+  { 'distant closing quote', 'def broken() -> String: "' .. ('line\n'):rep(400), 'def broken() -> String: "' .. ('line\n'):rep(400) .. '"' },
 }
 local prefix = 'def before() -> U32: 1\n'
 local suffix = '\n' .. [[
@@ -76,6 +82,26 @@ local function edit(buf, from, to)
   local sr, sc = position(from, first)
   local er, ec = position(from, #from - last)
   vim.api.nvim_buf_set_text(buf, sr, sc, er, ec, vim.split(to:sub(first + 1, #to - last), '\n', { plain = true }))
+end
+-- These are valid Bend multiline strings, not declaration recovery points.
+-- In particular a later unescaped quote must still close the literal, even
+-- when its contents look like source code.
+for _, literal in ipairs({
+  '"first\ndef not_a_definition() -> U32: 1\nlast"',
+  '"first\n# not a comment\n\\"escaped\\"\nlast"',
+  '"\n\n"',
+  '"first\r\nlast"',
+}) do
+  local text = prefix .. 'def text() -> String: ' .. literal .. suffix
+  local tree = parse(text)
+  assert(not tree:has_error(), 'valid multiline string rejected: ' .. literal)
+  local strings = vim.treesitter.query.parse('bend2', '(string) @string')
+  local count = 0
+  for _, capture in strings:iter_captures(tree, text, 0, -1) do
+    assert(vim.treesitter.get_node_text(capture, text) == literal, 'multiline string cut short')
+    count = count + 1
+  end
+  assert(count == 1, 'expected exactly one complete multiline string')
 end
 local failed = {}
 for _, case in ipairs(cases) do

@@ -718,6 +718,8 @@ second"
     (identifier)
     (body
       (string
+        (string_content)
+        (string_content)
         (string_content)))))
 
 ==================

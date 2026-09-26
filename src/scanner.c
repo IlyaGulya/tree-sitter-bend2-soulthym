@@ -10,14 +10,15 @@ enum Token {
   DO_START, DO_END, DO_MORE, CALL_OPEN, INDEX_OPEN,
   PLUS, MINUS, GT, GE, SHR, MOD, PARALLEL, PARALLEL_START, PARALLEL_VALUE, PARALLEL_END,
   WRITE_START, WRITE_MORE, WRITE_END, IMPORT_START, IMPORT_END, INTEGER, NATURAL, FLOAT, IDENTIFIER,
-  DEF_KEYWORD, TYPE_KEYWORD, LAW_KEYWORD, DECLARATION_NAME, ERROR_SENTINEL,
+  DEF_KEYWORD, TYPE_KEYWORD, LAW_KEYWORD, DECLARATION_NAME,
+  STRING_START, STRING_NEWLINE, ERROR_SENTINEL,
 };
 enum Kind { BODY, MATCH, DO, PAR, LAMBDA, WRITE };
 typedef struct { uint32_t column, first; uint8_t kind; } Frame;
 #define MAX_FRAMES 100
-_Static_assert(2 + 9 * MAX_FRAMES <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE,
+_Static_assert(3 + 9 * MAX_FRAMES <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE,
                "scanner state must fit Tree-sitter's serialization buffer");
-typedef struct { uint8_t size; bool declaration_name; Frame frames[MAX_FRAMES]; } Scanner;
+typedef struct { uint8_t size; bool declaration_name, closed_string; Frame frames[MAX_FRAMES]; } Scanner;
 
 static bool space(int32_t c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
 static bool head(int32_t c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
@@ -92,6 +93,7 @@ unsigned tree_sitter_bend2_external_scanner_serialize(void *p, char *b) {
   unsigned n = 0;
   b[n++] = (char)s->size;
   b[n++] = (char)s->declaration_name;
+  b[n++] = (char)s->closed_string;
   for (unsigned i = 0; i < s->size; ++i) {
     Frame f = s->frames[i];
     b[n++] = (char)f.kind;
@@ -103,11 +105,12 @@ unsigned tree_sitter_bend2_external_scanner_serialize(void *p, char *b) {
 void tree_sitter_bend2_external_scanner_deserialize(void *p, const char *b, unsigned n) {
   Scanner *s = p;
   s->size = 0;
-  s->declaration_name = false;
-  if (n < 2 || (uint8_t)b[0] > MAX_FRAMES || n != 2u + 9u*(uint8_t)b[0]) return;
+  s->declaration_name = s->closed_string = false;
+  if (n < 3 || (uint8_t)b[0] > MAX_FRAMES || n != 3u + 9u*(uint8_t)b[0]) return;
   s->size = (uint8_t)b[0];
   s->declaration_name = b[1] != 0;
-  unsigned at = 2;
+  s->closed_string = b[2] != 0;
+  unsigned at = 3;
   for (unsigned i = 0; i < s->size; ++i) {
     Frame *f = &s->frames[i];
     f->kind = (uint8_t)b[at++]; f->column = f->first = 0;
@@ -118,12 +121,33 @@ void tree_sitter_bend2_external_scanner_deserialize(void *p, const char *b, unsi
 bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v) {
   Scanner *s = p;
   l->mark_end(l); // Zero-width layout tokens must not include following whitespace.
+  if (!v[ERROR_SENTINEL] && v[STRING_NEWLINE] && l->lookahead == '\n') {
+    if (!s->closed_string) return false;
+    advance(l); l->mark_end(l); l->result_symbol = STRING_NEWLINE; return true;
+  }
   bool newline = l->get_column(l) == 0, spaced = false;
   while (space(l->lookahead)) {
     newline |= l->lookahead == '\n'; spaced = true; l->advance(l, true);
   }
   if (l->lookahead == '#') return false; // Let the grammar retain comment nodes.
   uint32_t col = l->get_column(l);
+  if (!v[ERROR_SENTINEL] && v[STRING_START] && l->lookahead == '"') {
+    // Probe once per string, keeping the token's end at its opening quote.
+    // Valid multiline strings remain valid. If no unescaped closing quote
+    // exists, a newline becomes a recovery boundary rather than swallowing
+    // every following declaration. Lookahead also invalidates this token when
+    // an incremental edit removes or restores a distant closing quote.
+    advance(l); l->mark_end(l);
+    while (!l->eof(l) && l->lookahead != '"') {
+      if (l->lookahead == '\\') {
+        advance(l);
+        if (l->eof(l)) break;
+      }
+      advance(l);
+    }
+    s->closed_string = l->lookahead == '"';
+    l->result_symbol = STRING_START; return true;
+  }
   Frame *top = s->size ? &s->frames[s->size-1] : NULL;
   // Recovery must not reinterpret a following declaration's name as a value
   // in the damaged body. Give headers distinct tokens but the same public CST.
