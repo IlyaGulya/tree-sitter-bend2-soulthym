@@ -9,19 +9,38 @@ enum Token {
   FUNCTION_START, BLOCK_START, BODY_END, LAMBDA_START, MATCH_START, MATCH_END, CASE,
   DO_START, DO_END, DO_MORE, CALL_OPEN, INDEX_OPEN,
   PLUS, MINUS, GT, GE, SHR, MOD, PARALLEL, PARALLEL_START, PARALLEL_VALUE, PARALLEL_END,
-  WRITE_START, WRITE_MORE, WRITE_END, IMPORT_START, IMPORT_END, INTEGER, NATURAL, FLOAT, ERROR_SENTINEL,
+  WRITE_START, WRITE_MORE, WRITE_END, IMPORT_START, IMPORT_END, INTEGER, NATURAL, FLOAT, IDENTIFIER,
+  DEF_KEYWORD, TYPE_KEYWORD, LAW_KEYWORD, DECLARATION_NAME, ERROR_SENTINEL,
 };
 enum Kind { BODY, MATCH, DO, PAR, LAMBDA, WRITE };
 typedef struct { uint32_t column, first; uint8_t kind; } Frame;
 #define MAX_FRAMES 100
-_Static_assert(1 + 9 * MAX_FRAMES <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE,
+_Static_assert(2 + 9 * MAX_FRAMES <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE,
                "scanner state must fit Tree-sitter's serialization buffer");
-typedef struct { uint8_t size; Frame frames[MAX_FRAMES]; } Scanner;
+typedef struct { uint8_t size; bool declaration_name; Frame frames[MAX_FRAMES]; } Scanner;
 
 static bool space(int32_t c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
 static bool head(int32_t c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
 static bool name(int32_t c) { return head(c) || (c >= '0' && c <= '9') || c == '.'; }
 static void advance(TSLexer *l) { l->advance(l, false); }
+static bool reserved(const char *word) {
+  const char *keywords[] = {"def", "type", "law", "match", "case", "do", "return", "for", "exs", "where", "is", "import", "Type", "Data", "Kind", "Quant"};
+  for (unsigned i = 0; i < sizeof(keywords)/sizeof(*keywords); ++i)
+    if (!strcmp(word, keywords[i])) return true;
+  return false;
+}
+static bool read_name(TSLexer *l, char *word, unsigned capacity) {
+  unsigned n = 0;
+  bool valid = head(l->lookahead), after_dot = false;
+  while (name(l->lookahead)) {
+    if (after_dot && !head(l->lookahead)) valid = false;
+    after_dot = l->lookahead == '.';
+    if (n < capacity - 1) word[n++] = (char)l->lookahead;
+    advance(l);
+  }
+  word[n] = 0;
+  return valid && !after_dot;
+}
 // Bend speculatively reads `: T` and rewinds unless it is followed by `=`.
 // At a lambda boundary the colon can instead belong to an enclosing annotation.
 static bool typed_assignment(TSLexer *l) {
@@ -72,6 +91,7 @@ unsigned tree_sitter_bend2_external_scanner_serialize(void *p, char *b) {
   Scanner *s = p;
   unsigned n = 0;
   b[n++] = (char)s->size;
+  b[n++] = (char)s->declaration_name;
   for (unsigned i = 0; i < s->size; ++i) {
     Frame f = s->frames[i];
     b[n++] = (char)f.kind;
@@ -83,9 +103,11 @@ unsigned tree_sitter_bend2_external_scanner_serialize(void *p, char *b) {
 void tree_sitter_bend2_external_scanner_deserialize(void *p, const char *b, unsigned n) {
   Scanner *s = p;
   s->size = 0;
-  if (!n || (uint8_t)b[0] > MAX_FRAMES || n != 1u + 9u*(uint8_t)b[0]) return;
+  s->declaration_name = false;
+  if (n < 2 || (uint8_t)b[0] > MAX_FRAMES || n != 2u + 9u*(uint8_t)b[0]) return;
   s->size = (uint8_t)b[0];
-  unsigned at = 1;
+  s->declaration_name = b[1] != 0;
+  unsigned at = 2;
   for (unsigned i = 0; i < s->size; ++i) {
     Frame *f = &s->frames[i];
     f->kind = (uint8_t)b[at++]; f->column = f->first = 0;
@@ -95,7 +117,6 @@ void tree_sitter_bend2_external_scanner_deserialize(void *p, const char *b, unsi
 }
 bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v) {
   Scanner *s = p;
-  if (v[ERROR_SENTINEL]) return false;
   l->mark_end(l); // Zero-width layout tokens must not include following whitespace.
   bool newline = l->get_column(l) == 0, spaced = false;
   while (space(l->lookahead)) {
@@ -104,6 +125,39 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
   if (l->lookahead == '#') return false; // Let the grammar retain comment nodes.
   uint32_t col = l->get_column(l);
   Frame *top = s->size ? &s->frames[s->size-1] : NULL;
+  // Recovery must not reinterpret a following declaration's name as a value
+  // in the damaged body. Give headers distinct tokens but the same public CST.
+  if (head(l->lookahead) && (v[DEF_KEYWORD] || v[TYPE_KEYWORD] || v[LAW_KEYWORD] || v[DECLARATION_NAME])) {
+    char word[32];
+    bool valid_name = read_name(l, word, sizeof(word));
+    enum Token t = !strcmp(word, "def") ? DEF_KEYWORD : !strcmp(word, "type") ? TYPE_KEYWORD :
+      !strcmp(word, "law") ? LAW_KEYWORD : ERROR_SENTINEL;
+    if (t != ERROR_SENTINEL && v[t]) {
+      s->size = 0;
+      s->declaration_name = true;
+      l->mark_end(l); l->result_symbol = t; return true;
+    }
+    if (v[DECLARATION_NAME] && (!v[ERROR_SENTINEL] || s->declaration_name) && valid_name && !reserved(word)) {
+      s->size = 0;
+      s->declaration_name = false;
+      l->mark_end(l); l->result_symbol = DECLARATION_NAME; return true;
+    }
+    if (v[IDENTIFIER] && valid_name && !reserved(word)) {
+      l->mark_end(l); l->result_symbol = IDENTIFIER; return true;
+    }
+    if (!v[ERROR_SENTINEL] && v[IMPORT_START] && newline && !strcmp(word, "import") && space(l->lookahead)) {
+      l->result_symbol = IMPORT_START; return true;
+    }
+    return false;
+  }
+  if (v[ERROR_SENTINEL]) {
+    // Only actual, bounded scope closures are safe to synthesize at EOF. Never
+    // push speculative frames while Tree-sitter is trying all recovery tokens.
+    if (!top || !l->eof(l)) return false;
+    enum Token t = top->kind == MATCH ? MATCH_END : top->kind == DO ? DO_END :
+      top->kind == PAR ? PARALLEL_END : top->kind == WRITE ? WRITE_END : BODY_END;
+    --s->size; l->result_symbol = t; return true;
+  }
   if (v[IMPORT_END]) {
     if (!newline && !l->eof(l)) return false;
     l->result_symbol = IMPORT_END; return true;
@@ -143,11 +197,19 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     if (!push(s, t == DO_START ? DO : t == LAMBDA_START ? LAMBDA : BODY, t == FUNCTION_START ? 0 : col)) return false;
     l->result_symbol = t; return true;
   }
+  // A statement write starts with a real identifier token, not a zero-width
+  // probe. Keep its end marked while inspecting the index; on failure the same
+  // lexeme can be returned as an ordinary identifier without consuming suffixes.
   if (v[WRITE_START] && head(l->lookahead)) {
+    char word[32];
+    bool valid_name = read_name(l, word, sizeof(word)) && !reserved(word);
+    if (!valid_name) return false;
     l->mark_end(l);
-    while (name(l->lookahead)) advance(l);
     while (l->lookahead == ' ' || l->lookahead == '\t' || l->lookahead == '\r') advance(l);
-    if (l->lookahead != '[') return false;
+    if (l->lookahead != '[') {
+      if (!v[IDENTIFIER]) return false;
+      l->result_symbol = IDENTIFIER; return true;
+    }
     unsigned depth = 1; advance(l);
     while (depth && !l->eof(l)) {
       if (l->lookahead == '\'' || l->lookahead == '"') {
@@ -166,9 +228,12 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
       }
     }
     while (l->lookahead == ' ' || l->lookahead == '\t' || l->lookahead == '\r') advance(l);
-    if (l->lookahead != '<') return false;
-    advance(l);
-    if (l->lookahead != '-') return false;
+    bool write = l->lookahead == '<';
+    if (write) { advance(l); write = l->lookahead == '-'; }
+    if (!write) {
+      if (!v[IDENTIFIER]) return false;
+      l->result_symbol = IDENTIFIER; return true;
+    }
     if (!push(s, WRITE, col)) return false;
     l->result_symbol = WRITE_START; return true;
   }
@@ -234,6 +299,7 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
       return true;
     }
     if (v[BODY_END] && top && (top->kind == BODY || top->kind == LAMBDA)) {
+      s->declaration_name |= !strcmp(word, "def") || !strcmp(word, "type") || !strcmp(word, "law");
       --s->size; l->result_symbol = BODY_END; return true;
     }
     return false;
@@ -280,6 +346,11 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
   if (v[PARALLEL_VALUE] && top && top->kind == PAR && top->column) {
     --top->column; l->result_symbol = PARALLEL_VALUE; return true;
   }
+  if (v[IDENTIFIER] && head(l->lookahead)) {
+    char word[32];
+    if (!read_name(l, word, sizeof(word)) || reserved(word)) return false;
+    l->mark_end(l); l->result_symbol = IDENTIFIER; return true;
+  }
   if ((v[INTEGER] || v[NATURAL] || v[FLOAT]) && l->lookahead >= '0' && l->lookahead <= '9') {
     do { advance(l); } while (l->lookahead >= '0' && l->lookahead <= '9');
     enum Token t = INTEGER;
@@ -309,6 +380,12 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     --s->size; l->result_symbol = PARALLEL_END; return true;
   }
   if (v[BODY_END] && top && (top->kind == BODY || top->kind == LAMBDA)) {
+    if (head(l->lookahead)) {
+      // The next state may expect only `)`, so no scanner runs there. Remember
+      // a following declaration before a missing closer enters recovery.
+      char word[32]; read_name(l, word, sizeof(word));
+      s->declaration_name |= !strcmp(word, "def") || !strcmp(word, "type") || !strcmp(word, "law");
+    }
     --s->size; l->result_symbol = BODY_END; return true;
   }
   if (v[WRITE_END] && top && top->kind == WRITE) {

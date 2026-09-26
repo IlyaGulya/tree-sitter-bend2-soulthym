@@ -6,15 +6,13 @@
 /// <reference types="tree-sitter-cli/dsl" />
 // @ts-check
 
-const keywords = ['def', 'type', 'law', 'match', 'case', 'do', 'return',
-  'for', 'exs', 'where', 'is', 'import', 'Type', 'Data', 'Kind', 'Quant'];
 const args = rule => repeat(seq(rule, optional(',')));
 
 export default grammar({
   name: 'bend2',
   extras: $ => [/[ \t\r\n]+/, $.comment],
-  word: $ => $.identifier,
-  reserved: { global: $ => keywords },
+  // Names are scanned as whole lexemes: contextual keyword extraction can turn
+  // `def` into an identifier when recovering from a missing closing delimiter.
   externals: $ => [
     $._function_start, $._block_start, $._body_end, $._lambda_start,
     $._match_start, $._match_end, $._case,
@@ -23,7 +21,8 @@ export default grammar({
     $._plus, $._minus, $._gt, $._ge, $._shr, $._mod,
     $._parallel, $._parallel_start, $._parallel_value, $._parallel_end,
     $._write_start, $._write_more, $._write_end, $._import_start, $._import_end,
-    $.integer, $.natural, $.float, $._error_sentinel,
+    $.integer, $.natural, $.float, $.identifier,
+    $._def_keyword, $._type_keyword, $._law_keyword, $._declaration_name, $._error_sentinel,
   ],
   conflicts: $ => [
     [$.body, $.binding],
@@ -39,7 +38,10 @@ export default grammar({
       field('path', $.import_path), 'as', field('alias', $.module_alias))), $._import_end),
     module_alias: $ => /[A-Za-z_][A-Za-z0-9_]*/,
     import_path: $ => /(?:\.\/|(?:\.\.\/)+|\/|0x[0-9a-f]+\/|[^\s/]+@[^\s/]+\/)?(?:[A-Za-z_][A-Za-z0-9_-]*\/)*[A-Za-z_][A-Za-z0-9_-]*\.bend/,
-    function_definition: $ => seq(optional($.decorator), 'def', field('name', $.identifier),
+    // Literal alternatives remain available to the internal recovery lexer;
+    // external variants recognize fresh headers and discard stale layout state.
+    function_definition: $ => seq(optional($.decorator), choice('def', alias($._def_keyword, 'def')),
+      field('name', alias($._declaration_name, $.identifier)),
       optional('?'), field('parameters', $.parameters), optional(seq('->', field('return_type', $._expression))),
       ':', field('body', choice($.foreign_body, seq($._function_start, $.body, $._body_end)))),
     decorator: $ => seq('@', 'unsafe'),
@@ -48,13 +50,15 @@ export default grammar({
       optional(field('quantity', choice('+', '-', '~'))), field('name', $.identifier), ':', field('type', $._expression))),
     foreign_body: $ => repeat1($.foreign_import),
     foreign_import: $ => seq('import', field('path', $.string)),
-    type_definition: $ => seq('type', field('name', $.identifier), optional($.type_parameters),
+    type_definition: $ => seq(choice('type', alias($._type_keyword, 'type')),
+      field('name', alias($._declaration_name, $.identifier)), optional($.type_parameters),
       'is', field('kind', $._expression), ':', repeat($.constructor_definition)),
     type_parameters: $ => seq('<', args($.type_parameter), '>'),
     type_parameter: $ => choice(field('name', $.identifier), seq(
       optional(field('quantity', choice('+', '-'))), field('name', $.identifier), ':', field('type', $._expression))),
     constructor_definition: $ => seq(field('name', $.identifier), '{', args($.type_parameter), '}'),
-    law_definition: $ => seq('law', field('name', $.identifier), ':', repeat($.law_clause),
+    law_definition: $ => seq(choice('law', alias($._law_keyword, 'law')),
+      field('name', alias($._declaration_name, $.identifier)), ':', repeat($.law_clause),
       field('body', $._block)),
     law_clause: $ => seq(choice(seq('for', optional(field('quantity', choice('+', '-', '~')))), 'exs'),
       field('name', $.identifier), ':', field('type', $._expression), optional(seq('where', field('constraint', $._expression)))),
@@ -70,8 +74,12 @@ export default grammar({
       $._parallel_start, field('pattern', $.binding), repeat(seq($._parallel, field('pattern', $.binding))), '=',
       repeat1(seq($._parallel_value, field('value', $._expression))), $._parallel_end,
       optional(';'), field('body', $.body)),
-    write_sequence: $ => seq($._write_start, field('write', $.array_write),
+    write_sequence: $ => seq(field('write', alias($._statement_write, $.array_write)),
       optional(seq(choice(';', $._write_more), field('body', $.body))), $._write_end),
+    _statement_write: $ => seq(field('target', alias($._statement_index, $.index_expression)),
+      '<-', field('value', $._write_value)),
+    _statement_index: $ => seq(field('array', alias($._write_start, $.identifier)),
+      alias($._index_open, '['), field('index', $._expression), ']'),
     match_expression: $ => seq('match', repeat1(seq(field('value', $._expression), optional(','))), ':',
       $._match_start, repeat($.case_clause), $._match_end),
     case_clause: $ => seq($._case, 'case', repeat1(seq(field('pattern', $._expression), optional(','))), ':',
@@ -93,7 +101,6 @@ export default grammar({
       $.eliminator, $.parenthesized_expression, $.tuple_expression, $.list_expression,
       $.array_expression, $.do_expression,
     ),
-    identifier: $ => /[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*/,
     builtin_type: $ => choice('Type', 'Data', 'Quant'),
     kind_expression: $ => seq('Kind', '(', $._expression, ')'),
     quantity: $ => token(seq('&', /[012]/)),
@@ -134,8 +141,10 @@ export default grammar({
     list_expression: $ => seq('[', args($._expression), ']'),
     array_expression: $ => prec(12, seq('[', field('value', $._expression), ':', field('type', $._atom),
       choice('*', '^'), field('size', $._expression), ']')),
-    do_expression: $ => seq('do', field('monad', $.identifier), '<', args($._expression), '>', ':',
-      $._do_start, field('body', $.do_body), $._do_end),
+    // Reduce the header before entering its body so recovery need not search
+    // through every header token to find an enclosing declaration.
+    do_expression: $ => seq($._do_header, $._do_start, field('body', $.do_body), $._do_end),
+    _do_header: $ => seq('do', field('monad', $.identifier), '<', args($._expression), '>', ':'),
     do_body: $ => choice($.do_binding, $.do_execution, $.do_step, $.return_expression, $._expression),
     do_binding: $ => prec.right(seq(field('name', choice($.identifier, $.reusable_expression)), ':',
       field('type', $._domain_expression), choice('=', '<-'), field('value', $._expression), optional(';'), field('body', $.do_body))),
