@@ -1,17 +1,162 @@
 /**
- * @file Bend2 tree-sitter-parser
+ * @file Concrete syntax for Bend 2 (see README.md for the pinned reference).
  * @author Thybault Alabarbe <thybault.alabarbe@gmail.com>
  * @license MIT
  */
-
 /// <reference types="tree-sitter-cli/dsl" />
 // @ts-check
 
-export default grammar({
-  name: "bend2",
+const keywords = ['def', 'type', 'law', 'match', 'case', 'do', 'return',
+  'for', 'exs', 'where', 'is', 'import', 'Type', 'Data', 'Kind', 'Quant'];
+const args = rule => repeat(seq(rule, optional(',')));
 
+export default grammar({
+  name: 'bend2',
+  extras: $ => [/[ \t\r\n]+/, $.comment],
+  word: $ => $.identifier,
+  reserved: { global: $ => keywords },
+  externals: $ => [
+    $._function_start, $._block_start, $._body_end, $._lambda_start,
+    $._match_start, $._match_end, $._case,
+    $._do_start, $._do_end, $._do_more,
+    $._call_open, $._index_open,
+    $._plus, $._minus, $._gt, $._ge, $._shr, $._mod,
+    $._parallel, $._parallel_start, $._parallel_value, $._parallel_end,
+    $._write_start, $._write_more, $._write_end, $._import_start, $._import_end,
+    $.integer, $.natural, $.float, $._error_sentinel,
+  ],
+  conflicts: $ => [
+    [$.body, $.binding],
+    [$.type_application, $._atom],
+    [$._expression, $._generic_argument],
+    [$._expression, $._domain_expression],
+    [$._expression, $._write_value],
+  ],
   rules: {
-    // TODO: add the actual grammar rules
-    source_file: $ => "hello"
-  }
+    source_file: $ => seq(repeat($.import_statement), repeat($._declaration)),
+    _declaration: $ => choice($.function_definition, $.type_definition, $.law_definition),
+    import_statement: $ => seq($._import_start, 'import', choice('Base', seq(
+      field('path', $.import_path), 'as', field('alias', $.module_alias))), $._import_end),
+    module_alias: $ => /[A-Za-z_][A-Za-z0-9_]*/,
+    import_path: $ => /(?:\.\/|(?:\.\.\/)+|\/|0x[0-9a-f]+\/|[^\s/]+@[^\s/]+\/)?(?:[A-Za-z_][A-Za-z0-9_-]*\/)*[A-Za-z_][A-Za-z0-9_-]*\.bend/,
+    function_definition: $ => seq(optional($.decorator), 'def', field('name', $.identifier),
+      optional('?'), field('parameters', $.parameters), optional(seq('->', field('return_type', $._expression))),
+      ':', field('body', choice($.foreign_body, seq($._function_start, $.body, $._body_end)))),
+    decorator: $ => seq('@', 'unsafe'),
+    parameters: $ => seq('(', args($.parameter), ')'),
+    parameter: $ => choice(field('name', $.identifier), seq(
+      optional(field('quantity', choice('+', '-', '~'))), field('name', $.identifier), ':', field('type', $._expression))),
+    foreign_body: $ => repeat1($.foreign_import),
+    foreign_import: $ => seq('import', field('path', $.string)),
+    type_definition: $ => seq('type', field('name', $.identifier), optional($.type_parameters),
+      'is', field('kind', $._expression), ':', repeat($.constructor_definition)),
+    type_parameters: $ => seq('<', args($.type_parameter), '>'),
+    type_parameter: $ => choice(field('name', $.identifier), seq(
+      optional(field('quantity', choice('+', '-'))), field('name', $.identifier), ':', field('type', $._expression))),
+    constructor_definition: $ => seq(field('name', $.identifier), '{', args($.type_parameter), '}'),
+    law_definition: $ => seq('law', field('name', $.identifier), ':', repeat($.law_clause),
+      field('body', $._block)),
+    law_clause: $ => seq(choice(seq('for', optional(field('quantity', choice('+', '-', '~')))), 'exs'),
+      field('name', $.identifier), ':', field('type', $._expression), optional(seq('where', field('constraint', $._expression)))),
+
+    // Bodies terminate with a value or match; lets own the rest of the body.
+    _block: $ => seq($._block_start, $.body, $._body_end),
+    body: $ => choice($.let_expression, $.parallel_let_expression, $.match_expression, $.write_sequence, $._expression),
+    binding: $ => seq(optional('-'), $._expression),
+    let_expression: $ => prec.right(seq(field('pattern', $.binding),
+      optional(seq(':', field('type', $._expression))), '=', field('value', $._expression),
+      optional(';'), field('body', $.body))),
+    parallel_let_expression: $ => seq(field('pattern', $.binding),
+      $._parallel_start, field('pattern', $.binding), repeat(seq($._parallel, field('pattern', $.binding))), '=',
+      repeat1(seq($._parallel_value, field('value', $._expression))), $._parallel_end,
+      optional(';'), field('body', $.body)),
+    write_sequence: $ => seq($._write_start, field('write', $.array_write),
+      optional(seq(choice(';', $._write_more), field('body', $.body))), $._write_end),
+    match_expression: $ => seq('match', repeat1(seq(field('value', $._expression), optional(','))), ':',
+      $._match_start, repeat($.case_clause), $._match_end),
+    case_clause: $ => seq($._case, 'case', repeat1(seq(field('pattern', $._expression), optional(','))), ':',
+      field('body', $.body), $._body_end),
+
+    _expression: $ => choice($._atom, $.binary_expression, $.lambda_expression),
+    _domain_expression: $ => choice($._atom, alias($._domain_binary, $.binary_expression)),
+    _generic_argument: $ => choice($._atom, alias($._generic_binary, $.binary_expression)),
+    _write_value: $ => choice($._atom, alias($._write_binary, $.binary_expression)),
+    _domain_binary: $ => binary($, $._domain_expression, 1),
+    _generic_binary: $ => binary($, $._generic_argument, 5),
+    _write_binary: $ => binary($, $._write_value, 2),
+    _atom: $ => choice(
+      $.identifier, $.builtin_type, $.kind_expression, $.quantity, $.integer, $.natural, $.float,
+      $.natural_successor, $.character, $.string, $.hole, $.constructor_expression,
+      $.type_application, $.call_expression, $.index_expression, $.array_write,
+      $.reusable_expression, $.dependent_type,
+      $.annotation_expression, $.equality_expression, $.reflexivity, $.rewrite_expression,
+      $.eliminator, $.parenthesized_expression, $.tuple_expression, $.list_expression,
+      $.array_expression, $.do_expression,
+    ),
+    identifier: $ => /[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*/,
+    builtin_type: $ => choice('Type', 'Data', 'Quant'),
+    kind_expression: $ => seq('Kind', '(', $._expression, ')'),
+    quantity: $ => token(seq('&', /[012]/)),
+    natural_successor: $ => prec.right(-1, seq($.natural, token.immediate('+'), field('value', $._expression))),
+    character: $ => seq("'", choice($.escape_sequence, token.immediate(prec(1, /[^\\]/u))), token.immediate("'")),
+    string: $ => seq('"', repeat(choice($.escape_sequence, $.string_content)), token.immediate('"')),
+    string_content: $ => token.immediate(prec(1, /[^"\\]+/)),
+    escape_sequence: $ => token.immediate(/\\([ntr0\\'"]|[uU]\{[0-9a-fA-F]{1,8}\})/),
+    hole: $ => seq('?', field('name', $.identifier)),
+    constructor_expression: $ => seq(field('name', $.identifier), token.immediate('{'), args($._expression), '}'),
+    type_application: $ => seq(field('name', $.identifier), '<',
+      field('argument', $._generic_argument), choice('>', seq(',', args(field('argument', $._expression)), '>'))),
+    call_expression: $ => prec.left(14, seq(field('function', $._expression),
+      field('arguments', $.arguments))),
+    arguments: $ => seq(choice(alias($._call_open, '('), $.gpu_call),
+      repeat(seq(field('argument', $.template_argument), optional(','))), args(field('argument', $._expression)), ')'),
+    gpu_call: $ => '!(',
+    template_argument: $ => seq('~', $._expression),
+    index_expression: $ => prec.left(14, seq(field('array', $._expression), alias($._index_open, '['), field('index', $._expression), ']')),
+    array_write: $ => prec.right(1, seq(field('target', $.index_expression), '<-', field('value', $._write_value))),
+    binary_expression: $ => binary($, $._expression, 0),
+    reusable_expression: $ => prec(12, seq('+', $._expression)),
+    lambda_expression: $ => prec.right(-2, seq(field('parameter', choice($.identifier, $.reusable_expression)), '=>', field('body', seq($._lambda_start, $.body, $._body_end)))),
+    dependent_type: $ => prec.right(0, seq(choice(seq('@', optional(choice('+', '-'))), '&'),
+      field('name', $.identifier), ':', field('domain', $._domain_expression), '->', field('codomain', $._expression))),
+    annotation_expression: $ => seq('{', field('value', $._expression), ':', field('type', $._expression), '}'),
+    equality_expression: $ => seq('{', field('left', $._expression), choice('==', '!='),
+      field('right', $._expression), ':', field('type', $._expression), '}'),
+    reflexivity: $ => seq('{', '==', '}'),
+    rewrite_expression: $ => prec.right(-2, seq('%', optional(seq(field('name', $.identifier), '@')),
+      field('proof', $._expression), ':', field('motive', $._expression), optional(';'), field('body', $._block))),
+    eliminator: $ => seq('\\', '{', repeat($.eliminator_arm), optional(seq(field('fallback', $._expression), optional(';'))), '}'),
+    eliminator_arm: $ => seq(field('name', $.identifier), ':', field('value', $._expression), optional(';')),
+    parenthesized_expression: $ => seq('(', $._block_start, field('body', $.body),
+      optional(seq(':', field('type', $._expression))), $._body_end, ')'),
+    tuple_expression: $ => seq('(', $._block_start, field('element', $.body), $._body_end, ',',
+      commaSep1($._expression), optional(seq(':', field('type', $._expression))), ')'),
+    list_expression: $ => seq('[', args($._expression), ']'),
+    array_expression: $ => prec(12, seq('[', field('value', $._expression), ':', field('type', $._atom),
+      choice('*', '^'), field('size', $._expression), ']')),
+    do_expression: $ => seq('do', field('monad', $.identifier), '<', args($._expression), '>', ':',
+      $._do_start, field('body', $.do_body), $._do_end),
+    do_body: $ => choice($.do_binding, $.do_execution, $.do_step, $.return_expression, $._expression),
+    do_binding: $ => prec.right(seq(field('name', choice($.identifier, $.reusable_expression)), ':',
+      field('type', $._domain_expression), choice('=', '<-'), field('value', $._expression), optional(';'), field('body', $.do_body))),
+    do_execution: $ => prec.right(seq(field('type', $._expression), '<-', field('value', $._expression), optional(';'), field('body', $.do_body))),
+    do_step: $ => prec.right(seq(field('value', $._expression), choice(';', $._do_more), field('body', $.do_body))),
+    return_expression: $ => seq('return', $._expression),
+    comment: $ => token(seq('#', /[^\n]*/)),
+  },
 });
+
+function commaSep1(rule) { return seq(rule, repeat(seq(',', rule))); }
+
+function binary($, operand, minimum) {
+  return choice(...[
+    [0, '->', true], [1, '&', true], [1, '|', true], [2, '||'], [3, '&&'],
+    [4, '<'], [4, '<='], [4, alias($._gt, '>')], [4, alias($._ge, '>=')],
+    [5, '<>', true], [5, '++', true], [5, '<&>', true],
+    [6, '.|.'], [7, '.^.'], [8, '.&.'], [9, '<<'], [9, alias($._shr, '>>')],
+    [10, alias($._plus, '+')], [10, alias($._minus, '-')],
+    [11, '*'], [11, '/'], [11, alias($._mod, '%')],
+  ].filter(([p]) => p >= minimum).map(([p, op, right]) =>
+    (right ? prec.right : prec.left)(p, seq(
+      field('left', operand), field('operator', op), field('right', operand)))));
+}

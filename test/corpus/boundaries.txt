@@ -1,0 +1,303 @@
+==================
+Typed lets inside lambda bodies
+==================
+def f() -> U32 -> U32:
+  x => y: U32 = x; y
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters)
+    (binary_expression
+      (identifier)
+      (identifier))
+    (body
+      (lambda_expression
+        (identifier)
+        (body
+          (let_expression
+            (binding
+              (identifier))
+            (identifier)
+            (identifier)
+            (body
+              (identifier))))))))
+
+==================
+Arrow domains end before the first unparenthesized arrow
+==================
+law f: @x:A -> B -> C
+law g: @x:(A -> B) -> C
+---
+
+(source_file
+  (law_definition
+    (identifier)
+    (body
+      (dependent_type
+        (identifier)
+        (identifier)
+        (binary_expression
+          (identifier)
+          (identifier)))))
+  (law_definition
+    (identifier)
+    (body
+      (dependent_type
+        (identifier)
+        (parenthesized_expression
+          (body
+            (binary_expression
+              (identifier)
+              (identifier))))
+        (identifier)))))
+
+==================
+Comments around matches and declarations
+==================
+def f(x: T) -> T:
+  # head
+  match x:
+    # first
+    case A{}: x # trailing
+    # second
+    case B{}: x
+# separator
+
+def after() -> U32: 0
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (comment)
+    (body
+      (match_expression
+        (identifier)
+        (comment)
+        (case_clause
+          (constructor_expression
+            (identifier))
+          (body
+            (identifier))
+          (comment)
+          (comment))
+        (case_clause
+          (constructor_expression
+            (identifier))
+          (body
+            (identifier))
+          (comment)))))
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (integer))))
+
+==================
+Parallel bindings count expressions rather than lines
+==================
+def f() -> U32:
+  a b c d = {1 : U32} {2 : U32}
+    {3 : U32} {4 : U32}
+  (a + b + c + d : U32)
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (parallel_let_expression
+        (binding
+          (identifier))
+        (binding
+          (identifier))
+        (binding
+          (identifier))
+        (binding
+          (identifier))
+        (annotation_expression
+          (integer)
+          (identifier))
+        (annotation_expression
+          (integer)
+          (identifier))
+        (annotation_expression
+          (integer)
+          (identifier))
+        (annotation_expression
+          (integer)
+          (identifier))
+        (body
+          (parenthesized_expression
+            (body
+              (binary_expression
+                (binary_expression
+                  (binary_expression
+                    (identifier)
+                    (identifier))
+                  (identifier))
+                (identifier)))
+            (identifier)))))))
+
+==================
+Empty strings and escaped quotes
+==================
+def f() -> T: ("", "#", "\\", '\u{1f600}', '\n')
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (tuple_expression
+        (body
+          (string))
+        (string
+          (string_content))
+        (string
+          (escape_sequence))
+        (character
+          (escape_sequence))
+        (character
+          (escape_sequence))))))
+
+==================
+Scoped quantities and holes
+==================
+def f(a, -A: Kind(a), +x: A) -> +List<A>: ?TODO
+law f: &x:U32 -> {x == 0 : U32}
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier))
+      (parameter
+        (identifier)
+        (kind_expression
+          (identifier)))
+      (parameter
+        (identifier)
+        (identifier)))
+    (reusable_expression
+      (type_application
+        (identifier)
+        (identifier)))
+    (body
+      (hole
+        (identifier))))
+  (law_definition
+    (identifier)
+    (body
+      (dependent_type
+        (identifier)
+        (identifier)
+        (equality_expression
+          (identifier)
+          (integer)
+          (identifier))))))
+
+==================
+Generic first arguments require parentheses around low precedence forms
+:error
+==================
+law bad: List<A & B>
+---
+
+(ERROR)
+
+==================
+The first generic argument requires a comma or closer
+:error
+==================
+law bad: Pair<A B>
+---
+
+(ERROR)
+
+==================
+A plus glued to a name is not addition
+:error
+==================
+def f(x: U32, y: U32) -> U32: (x+y : U32)
+---
+
+(ERROR)
+
+==================
+A greater-than operator cannot be glued on the left
+:error
+==================
+def f(x: U32, y: U32) -> Bool: (x> y : U32)
+---
+
+(ERROR)
+
+==================
+Constructor braces must be adjacent
+:error
+==================
+def f() -> T: C {0}
+---
+
+(ERROR)
+
+==================
+Imports occupy whole lines
+:error
+==================
+import Base def f() -> U32: 0
+---
+
+(ERROR)
+
+==================
+Imports precede declarations
+:error
+==================
+def f() -> U32: 0
+import Base
+---
+
+(ERROR)
+
+==================
+Qualified import aliases are not allowed
+:error
+==================
+import ./a.bend as A.B
+---
+
+(ERROR)
+
+==================
+Negative literals are not a unary expression form
+:error
+==================
+def f() -> U32: -1
+---
+
+(ERROR)
+
+==================
+Trailing comma is not a tuple element
+:error
+==================
+def f() -> T: (1,)
+---
+
+(ERROR)

@@ -9,7 +9,10 @@
       "file-types": [
         "bend"
       ],
-      "injection-regex": "^bend2$",
+      "injection-regex": "^(bend|bend2)$",
+      "highlights": "queries/highlights.scm",
+      "locals": "queries/locals.scm",
+      "tags": "queries/tags.scm",
       "class-name": "TreeSitterBend2"
     }
   ],

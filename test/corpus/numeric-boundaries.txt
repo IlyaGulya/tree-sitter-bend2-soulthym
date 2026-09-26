@@ -1,0 +1,15 @@
+==================
+Integer-name adjacency is invalid even where commas are optional
+:error
+==================
+def f() -> T: g(12abc)
+---
+(ERROR)
+
+==================
+Natural-name adjacency is invalid even where commas are optional
+:error
+==================
+def f() -> T: g(12nx)
+---
+(ERROR)

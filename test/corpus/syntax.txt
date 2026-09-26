@@ -1,0 +1,1113 @@
+==================
+Declarations, imports and foreign paths
+==================
+import Base
+import ./laws.bend as Laws
+import lib@1.2.3/main.bend as Lib
+@unsafe
+def work?(~A: Type, -n: Nat, +x: A) -> IO(A):
+  import "effs/work.c"
+  import "effs/work.js"
+type Box<a, -A: Kind(a)> is Kind(a):
+  Box{value: A}
+  Empty{}
+---
+
+(source_file
+  (import_statement)
+  (import_statement
+    (import_path)
+    (module_alias))
+  (import_statement
+    (import_path)
+    (module_alias))
+  (function_definition
+    (decorator)
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (builtin_type))
+      (parameter
+        (identifier)
+        (identifier))
+      (parameter
+        (identifier)
+        (identifier)))
+    (call_expression
+      (identifier)
+      (arguments
+        (identifier)))
+    (foreign_body
+      (foreign_import
+        (string
+          (string_content)))
+      (foreign_import
+        (string
+          (string_content)))))
+  (type_definition
+    (identifier)
+    (type_parameters
+      (type_parameter
+        (identifier))
+      (type_parameter
+        (identifier)
+        (kind_expression
+          (identifier))))
+    (kind_expression
+      (identifier))
+    (constructor_definition
+      (identifier)
+      (type_parameter
+        (identifier)
+        (identifier)))
+    (constructor_definition
+      (identifier))))
+
+==================
+Law clauses and dependent types
+==================
+law law_name:
+  for ~A: Type
+  for +x: A
+  exs y: A where {y == x : A}
+  @-e: {x == y : A} -> &z:A -> A & A | A
+
+def law_name(A, x): (x, {==})
+---
+
+(source_file
+  (law_definition
+    (identifier)
+    (law_clause
+      (identifier)
+      (builtin_type))
+    (law_clause
+      (identifier)
+      (identifier))
+    (law_clause
+      (identifier)
+      (identifier)
+      (equality_expression
+        (identifier)
+        (identifier)
+        (identifier)))
+    (body
+      (dependent_type
+        (identifier)
+        (equality_expression
+          (identifier)
+          (identifier)
+          (identifier))
+        (dependent_type
+          (identifier)
+          (identifier)
+          (binary_expression
+            (identifier)
+            (binary_expression
+              (identifier)
+              (identifier)))))))
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier))
+      (parameter
+        (identifier)))
+    (body
+      (tuple_expression
+        (body
+          (identifier))
+        (reflexivity)))))
+
+==================
+Nested matches obey case columns, not match indentation
+==================
+def f(x: T, y: T) -> T: match x:
+  case A{}:
+    match y:
+      case A{}: B{}
+      case B{}: A{}
+  case B{}: x
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier))
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (body
+      (match_expression
+        (identifier)
+        (case_clause
+          (constructor_expression
+            (identifier))
+          (body
+            (match_expression
+              (identifier)
+              (case_clause
+                (constructor_expression
+                  (identifier))
+                (body
+                  (constructor_expression
+                    (identifier))))
+              (case_clause
+                (constructor_expression
+                  (identifier))
+                (body
+                  (constructor_expression
+                    (identifier)))))))
+        (case_clause
+          (constructor_expression
+            (identifier))
+          (body
+            (identifier)))))))
+
+==================
+An empty match is a body
+==================
+def absurd(x: Empty) -> Type:
+  match x:
+def after() -> Type: Type
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier)))
+    (builtin_type)
+    (body
+      (match_expression
+        (identifier))))
+  (function_definition
+    (identifier)
+    (parameters)
+    (builtin_type)
+    (body
+      (builtin_type))))
+
+==================
+Constructor, tuple, list and natural patterns
+==================
+def f(xs: List<U32>, n: Nat) -> U32:
+  match xs, n:
+    case [+x, y], 1n+p:
+      (+a, b) = (x, y)
+      Box{+v} = Box{a}
+      (v + b : U32)
+    case Nil{}, 0n: 0
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (type_application
+          (identifier)
+          (identifier)))
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (body
+      (match_expression
+        (identifier)
+        (identifier)
+        (case_clause
+          (list_expression
+            (reusable_expression
+              (identifier))
+            (identifier))
+          (natural_successor
+            (natural)
+            (identifier))
+          (body
+            (let_expression
+              (binding
+                (tuple_expression
+                  (body
+                    (reusable_expression
+                      (identifier)))
+                  (identifier)))
+              (tuple_expression
+                (body
+                  (identifier))
+                (identifier))
+              (body
+                (let_expression
+                  (binding
+                    (constructor_expression
+                      (identifier)
+                      (reusable_expression
+                        (identifier))))
+                  (constructor_expression
+                    (identifier)
+                    (identifier))
+                  (body
+                    (parenthesized_expression
+                      (body
+                        (binary_expression
+                          (identifier)
+                          (identifier)))
+                      (identifier))))))))
+        (case_clause
+          (constructor_expression
+            (identifier))
+          (natural)
+          (body
+            (integer)))))))
+
+==================
+Local, typed, erased and parallel bindings
+==================
+def f(x: U32) -> U32:
+  -proof = {==}
+  y: U32 = x
+  +a +b c = g(y) {5 : U32} g(3)
+  +m = h(a, b)
+  (m + c : U32)
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (body
+      (let_expression
+        (binding
+          (identifier))
+        (reflexivity)
+        (body
+          (let_expression
+            (binding
+              (identifier))
+            (identifier)
+            (identifier)
+            (body
+              (parallel_let_expression
+                (binding
+                  (reusable_expression
+                    (identifier)))
+                (binding
+                  (reusable_expression
+                    (identifier)))
+                (binding
+                  (identifier))
+                (call_expression
+                  (identifier)
+                  (arguments
+                    (identifier)))
+                (annotation_expression
+                  (integer)
+                  (identifier))
+                (call_expression
+                  (identifier)
+                  (arguments
+                    (integer)))
+                (body
+                  (let_expression
+                    (binding
+                      (reusable_expression
+                        (identifier)))
+                    (call_expression
+                      (identifier)
+                      (arguments
+                        (identifier)
+                        (identifier)))
+                    (body
+                      (parenthesized_expression
+                        (body
+                          (binary_expression
+                            (identifier)
+                            (identifier)))
+                        (identifier)))))))))))))
+
+==================
+Precedence and associativity
+==================
+def f(a: U32, b: U32, c: U32) -> U32:
+  (a + b * c - 1 << 2 .&. 3 .^. 4 .|. 5 : U32)
+law arrow: A -> B -> C
+law pair: A & B | C
+law append: a <> b ++ c <&> d
+law bool: a || b && c
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier))
+      (parameter
+        (identifier)
+        (identifier))
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (body
+      (parenthesized_expression
+        (body
+          (binary_expression
+            (binary_expression
+              (binary_expression
+                (binary_expression
+                  (binary_expression
+                    (binary_expression
+                      (identifier)
+                      (binary_expression
+                        (identifier)
+                        (identifier)))
+                    (integer))
+                  (integer))
+                (integer))
+              (integer))
+            (integer)))
+        (identifier))))
+  (law_definition
+    (identifier)
+    (body
+      (binary_expression
+        (identifier)
+        (binary_expression
+          (identifier)
+          (identifier)))))
+  (law_definition
+    (identifier)
+    (body
+      (binary_expression
+        (identifier)
+        (binary_expression
+          (identifier)
+          (identifier)))))
+  (law_definition
+    (identifier)
+    (body
+      (binary_expression
+        (identifier)
+        (binary_expression
+          (identifier)
+          (binary_expression
+            (identifier)
+            (identifier))))))
+  (law_definition
+    (identifier)
+    (body
+      (binary_expression
+        (identifier)
+        (binary_expression
+          (identifier)
+          (identifier))))))
+
+==================
+Comparisons versus generic application
+==================
+def lt(x: U32, y: U32) -> Bool: (x < y : U32)
+def gt(x: U32, y: U32) -> Bool: (x > y : U32)
+def le(x: U32, y: U32) -> Bool: (x <= y : U32)
+def ge(x: U32, y: U32) -> Bool: (x >= y : U32)
+def shr(x: U32) -> U32: (x >> 2 : U32)
+law nested: List<List<U32>>
+law compound: Pair<(A & B), C -> D>
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier))
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (body
+      (parenthesized_expression
+        (body
+          (binary_expression
+            (identifier)
+            (identifier)))
+        (identifier))))
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier))
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (body
+      (parenthesized_expression
+        (body
+          (binary_expression
+            (identifier)
+            (identifier)))
+        (identifier))))
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier))
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (body
+      (parenthesized_expression
+        (body
+          (binary_expression
+            (identifier)
+            (identifier)))
+        (identifier))))
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier))
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (body
+      (parenthesized_expression
+        (body
+          (binary_expression
+            (identifier)
+            (identifier)))
+        (identifier))))
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (body
+      (parenthesized_expression
+        (body
+          (binary_expression
+            (identifier)
+            (integer)))
+        (identifier))))
+  (law_definition
+    (identifier)
+    (body
+      (type_application
+        (identifier)
+        (type_application
+          (identifier)
+          (identifier)))))
+  (law_definition
+    (identifier)
+    (body
+      (type_application
+        (identifier)
+        (parenthesized_expression
+          (body
+            (binary_expression
+              (identifier)
+              (identifier))))
+        (binary_expression
+          (identifier)
+          (identifier))))))
+
+==================
+Proof expressions and eliminators
+==================
+def proof(e: {x == y : A}) -> {f(x) == f(y) : B}:
+  %eq@e : {f(x) == f(_) : B}; {==}
+def elim() -> T:
+  \{A: x => x; B: y => y; fallback}
+def empty() -> T: \{}
+law unequal: {x != y : A}
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (equality_expression
+          (identifier)
+          (identifier)
+          (identifier))))
+    (equality_expression
+      (call_expression
+        (identifier)
+        (arguments
+          (identifier)))
+      (call_expression
+        (identifier)
+        (arguments
+          (identifier)))
+      (identifier))
+    (body
+      (rewrite_expression
+        (identifier)
+        (identifier)
+        (equality_expression
+          (call_expression
+            (identifier)
+            (arguments
+              (identifier)))
+          (call_expression
+            (identifier)
+            (arguments
+              (identifier)))
+          (identifier))
+        (body
+          (reflexivity)))))
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (eliminator
+        (eliminator_arm
+          (identifier)
+          (lambda_expression
+            (identifier)
+            (body
+              (identifier))))
+        (eliminator_arm
+          (identifier)
+          (lambda_expression
+            (identifier)
+            (body
+              (identifier))))
+        (identifier))))
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (eliminator)))
+  (law_definition
+    (identifier)
+    (body
+      (equality_expression
+        (identifier)
+        (identifier)
+        (identifier)))))
+
+==================
+Lambdas in annotations and tuples
+==================
+def f() -> U32:
+  g = {x => 11 : @-x: U32 -> U32}
+  h = (x => y => y, +z => z)
+  g(0)
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (let_expression
+        (binding
+          (identifier))
+        (annotation_expression
+          (lambda_expression
+            (identifier)
+            (body
+              (integer)))
+          (dependent_type
+            (identifier)
+            (identifier)
+            (identifier)))
+        (body
+          (let_expression
+            (binding
+              (identifier))
+            (tuple_expression
+              (body
+                (lambda_expression
+                  (identifier)
+                  (body
+                    (lambda_expression
+                      (identifier)
+                      (body
+                        (identifier))))))
+              (lambda_expression
+                (reusable_expression
+                  (identifier))
+                (body
+                  (identifier))))
+            (body
+              (call_expression
+                (identifier)
+                (arguments
+                  (integer))))))))))
+
+==================
+Strings and characters retain hashes and whitespace
+==================
+def text() -> String: "# not a comment\n\u{1F600}\""
+def hash() -> Char: '#'
+def space() -> Char: ' '
+def unicode() -> Char: 'λ'
+def escaped() -> Char: '\''
+def multi() -> String: "first
+second"
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (string
+        (string_content)
+        (escape_sequence)
+        (escape_sequence)
+        (escape_sequence))))
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (character)))
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (character)))
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (character)))
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (character
+        (escape_sequence))))
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (string
+        (string_content)))))
+
+==================
+Numbers and natural successor scope
+==================
+def ints() -> T: (0, 4294967295, 12n, 1.25e-3, 2.0E+4)
+def succ(x: Nat) -> Nat: 2n+x <> Nil{}
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (tuple_expression
+        (body
+          (integer))
+        (integer)
+        (natural)
+        (float)
+        (float))))
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (body
+      (natural_successor
+        (natural)
+        (binary_expression
+          (identifier)
+          (constructor_expression
+            (identifier)))))))
+
+==================
+Arrays, indexed writes and continuation
+==================
+def main() -> Array<U32> & U32:
+  a = [0 : U32*8n]
+  a[5] <- 42
+  a[1] <- 1; b = a
+  c = b
+  c[5]
+def depth(n: Nat) -> Array<U32>: [0 : U32^n]
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters)
+    (binary_expression
+      (type_application
+        (identifier)
+        (identifier))
+      (identifier))
+    (body
+      (let_expression
+        (binding
+          (identifier))
+        (array_expression
+          (integer)
+          (identifier)
+          (natural))
+        (body
+          (write_sequence
+            (array_write
+              (index_expression
+                (identifier)
+                (integer))
+              (integer))
+            (body
+              (write_sequence
+                (array_write
+                  (index_expression
+                    (identifier)
+                    (integer))
+                  (integer))
+                (body
+                  (let_expression
+                    (binding
+                      (identifier))
+                    (identifier)
+                    (body
+                      (let_expression
+                        (binding
+                          (identifier))
+                        (identifier)
+                        (body
+                          (index_expression
+                            (identifier)
+                            (integer))))))))))))))
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier)))
+    (type_application
+      (identifier)
+      (identifier))
+    (body
+      (array_expression
+        (integer)
+        (identifier)
+        (identifier)))))
+
+==================
+Do blocks, pure lets, execution, steps and return
+==================
+def main() -> IO(Unit):
+  do IO<Unit>:
+    log("a"); log("b")
+    n: U32 <- do IO<U32>:
+      log("c")
+      return 2
+    +v: U32 = n
+    Unit <- log("d")
+    do IO<Unit>:
+      log(show(v))
+    log("e")
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters)
+    (call_expression
+      (identifier)
+      (arguments
+        (identifier)))
+    (body
+      (do_expression
+        (identifier)
+        (identifier)
+        (do_body
+          (do_step
+            (call_expression
+              (identifier)
+              (arguments
+                (string
+                  (string_content))))
+            (do_body
+              (do_step
+                (call_expression
+                  (identifier)
+                  (arguments
+                    (string
+                      (string_content))))
+                (do_body
+                  (do_binding
+                    (identifier)
+                    (identifier)
+                    (do_expression
+                      (identifier)
+                      (identifier)
+                      (do_body
+                        (do_step
+                          (call_expression
+                            (identifier)
+                            (arguments
+                              (string
+                                (string_content))))
+                          (do_body
+                            (return_expression
+                              (integer))))))
+                    (do_body
+                      (do_binding
+                        (reusable_expression
+                          (identifier))
+                        (identifier)
+                        (identifier)
+                        (do_body
+                          (do_execution
+                            (identifier)
+                            (call_expression
+                              (identifier)
+                              (arguments
+                                (string
+                                  (string_content))))
+                            (do_body
+                              (do_step
+                                (do_expression
+                                  (identifier)
+                                  (identifier)
+                                  (do_body
+                                    (call_expression
+                                      (identifier)
+                                      (arguments
+                                        (call_expression
+                                          (identifier)
+                                          (arguments
+                                            (identifier)))))))
+                                (do_body
+                                  (call_expression
+                                    (identifier)
+                                    (arguments
+                                      (string
+                                        (string_content)))))))))))))))))))))
+
+==================
+Calls, templates and GPU markers
+==================
+def f(x: Nat) -> Nat:
+  a b = g!(x) g(x)
+  List.map(~&1, ~U32, ~(x => x), [1, 2])
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (body
+      (parallel_let_expression
+        (binding
+          (identifier))
+        (binding
+          (identifier))
+        (call_expression
+          (identifier)
+          (arguments
+            (gpu_call)
+            (identifier)))
+        (call_expression
+          (identifier)
+          (arguments
+            (identifier)))
+        (body
+          (call_expression
+            (identifier)
+            (arguments
+              (template_argument
+                (quantity))
+              (template_argument
+                (identifier))
+              (template_argument
+                (parenthesized_expression
+                  (body
+                    (lambda_expression
+                      (identifier)
+                      (body
+                        (identifier))))))
+              (list_expression
+                (integer)
+                (integer)))))))))
+
+==================
+A newline ends the call spine
+==================
+def f() -> U32:
+  x = g(0)
+  (x + 1 : U32)
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (let_expression
+        (binding
+          (identifier))
+        (call_expression
+          (identifier)
+          (arguments
+            (integer)))
+        (body
+          (parenthesized_expression
+            (body
+              (binary_expression
+                (identifier)
+                (integer)))
+            (identifier)))))))
+
+==================
+Optional commas and same-line definitions
+==================
+type T is Data: C{x: U32 y: U32,}
+def f(x: U32 y: U32,) -> T: C{x y,}
+def g() -> T: f (1 2,)
+---
+
+(source_file
+  (type_definition
+    (identifier)
+    (builtin_type)
+    (constructor_definition
+      (identifier)
+      (type_parameter
+        (identifier)
+        (identifier))
+      (type_parameter
+        (identifier)
+        (identifier))))
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier))
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (body
+      (constructor_expression
+        (identifier)
+        (identifier)
+        (identifier))))
+  (function_definition
+    (identifier)
+    (parameters)
+    (identifier)
+    (body
+      (call_expression
+        (identifier)
+        (arguments
+          (integer)
+          (integer))))))
+
+==================
+Contextual words remain identifiers
+==================
+def unsafe(as: U32) -> U32: as
+---
+
+(source_file
+  (function_definition
+    (identifier)
+    (parameters
+      (parameter
+        (identifier)
+        (identifier)))
+    (identifier)
+    (body
+      (identifier))))
+
+==================
+Reserved case cannot be a name
+:error
+==================
+def case() -> U32: 0
+---
+
+(ERROR)
+
+==================
+Python conditionals are not Bend syntax
+:error
+==================
+def f(x: U32) -> U32:
+  if x:
+    1
+  else:
+    0
+---
+
+(ERROR)
+
+==================
+Invalid escape
+:error
+==================
+def f() -> String: "\q"
+---
+
+(ERROR)
+
+==================
+Removed Unicode lambda
+:error
+==================
+def f() -> T: λx x
+---
+
+(ERROR)
+
+==================
+An incomplete expression recovers at the next definition
+:error
+==================
+def broken() -> U32: (1 +
+def intact() -> U32: 2
+---
+
+(ERROR)
