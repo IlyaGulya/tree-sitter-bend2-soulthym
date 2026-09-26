@@ -293,6 +293,11 @@ reports an invalid node type, ensure parser and queries come from the **same
 revision** and remove stale copies earlier on runtimepath. Loading a new `.so`
 generally requires restarting Neovim; reinstalling alone does not unload it.
 
+If colors change only while the source is incomplete, inspect its `ERROR` or
+missing nodes with `:InspectTree`. See [editing recovery and its limits](../README.md#recovery-while-editing),
+especially damaged match arms and multiline strings; these are distinct from
+installation or colorscheme problems.
+
 If installation says the language is unknown, registration must run **before**
 installation and before any `get_available()` result is cached. If `require`
 for `nvim-treesitter.configs` fails, you are probably using a `master` example on

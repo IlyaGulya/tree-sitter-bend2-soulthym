@@ -32,10 +32,12 @@ tree-sitter generate
 tree-sitter test
 tree-sitter build -o build/bend2.so
 nvim --headless -u NONE -l scripts/test-neovim.lua
+nvim --headless -u NONE -l scripts/test-recovery.lua
 node scripts/validate-upstream.mjs ../bend
 ```
 
-Equivalent npm scripts: `generate`, `test`, `test:neovim`, `test:upstream`.
+Equivalent npm scripts: `generate`, `test`, `test:neovim`, `test:recovery`,
+`test:upstream`.
 `npm run test:docs` checks the installation snippets in a temporary Neovim
 runtime without network access or changes to user configuration. It requires an
 installed main-branch nvim-treesitter checkout; set `BEND2_NVIM_TREESITTER` to its
@@ -57,6 +59,10 @@ On the pinned checkout:
   literals, proofs, do notation, templates, parallel lets, arrays and rejection.
 - All seven queries compile in Neovim **0.12.1**; captures, folds, conventional
   indentation and **180 deterministic incremental edits** are checked.
+- **24 recovery scenarios** additionally check error locality and retained
+  highlight captures; **7 damaged-match scenarios** check consistency and repair
+  only. Each scenario is broken and repaired twice using minimal buffer edits,
+  comparing complete node types/ranges against fresh parses.
 
 The sweep writes **every file's result** to `build/upstream-report.json`, not
 just failures. New rejections (including diagnostic fixtures) and formerly
@@ -134,6 +140,29 @@ The grammar follows the implementation, including:
 Indentation queries suggest conventional formatting; they do not define the
 language. Native C/JS foreign imports contain **paths**, not embedded source,
 so there is deliberately no fake C/JS injection query.
+
+### Recovery while editing
+
+Recovery tests require real syntax errors, intact neighboring `def`/`type`/`law`
+nodes, and preserved function, type, parameter, call and number captures. They
+cover missing delimiters, headers, bodies and let values; unfinished parallel
+lets, do binds, case patterns, rewrites and lambdas; stray characters and quote/
+escape mistakes. Repairing the text must restore the same tree as a fresh parse.
+Incremental consistency alone would not establish this: two equally damaged
+trees can agree while both lose highlighting.
+
+Unterminated strings recover at a newline **when no later unescaped closing
+quote exists**. Valid multiline strings, including strings containing apparent
+Bend declarations, remain valid. A later quote in otherwise unrelated code can
+therefore still extend an accidentally opened string. Multiline content is
+represented by separate `string_content` nodes around physical newlines.
+
+These are tested scenarios, not a guarantee for arbitrary broken programs.
+Recovery **inside a damaged match** remains coarse: later case arms can be
+absorbed into an error region, and complicated combinations can also affect
+following declarations. The seven match probes verify repair and incremental
+consistency, not highlight preservation for those arms. Fixing the original
+syntax error restores the complete tree.
 
 ### Boundaries and remaining limitations
 
