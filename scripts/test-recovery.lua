@@ -30,6 +30,23 @@ local cases = {
   { 'multiline closing quote', 'def broken() -> String: "first\nsecond', 'def broken() -> String: "first\nsecond"' },
   { 'distant closing quote', 'def broken() -> String: "' .. ('line\n'):rep(400), 'def broken() -> String: "' .. ('line\n'):rep(400) .. '"' },
 }
+local locality_count = #cases
+-- Known limits: later arms in the SAME damaged match can still be swallowed.
+-- Exercise repair/incremental consistency without enshrining today's error
+-- tree or requiring highlighting to stay broken after a future improvement.
+for _, arm in ipairs({
+  { 'missing let value', 'y =', 'y = 1; y' },
+  { 'missing parenthesis', '(1 + 2', '(1 + 2)' },
+  { 'missing call closer', 'g(1, 2', 'g(1, 2)' },
+  { 'invalid character', '$', '1' },
+  { 'missing constructor closer', 'C{1', 'C{1}' },
+  { 'missing quote', '"unfinished', '"unfinished"' },
+  { 'missing body', '', '1' },
+}) do
+  local start = 'def broken(x: T) -> U32:\n  match x:\n    case A{}:\n      '
+  local finish = '\n    case B{}: 42\n    case C{}: 43'
+  cases[#cases + 1] = { 'match arm: ' .. arm[1], start .. arm[2] .. finish, start .. arm[3] .. finish, true }
+end
 local prefix = 'def before() -> U32: 1\n'
 local suffix = '\n' .. [[
 type Recovered is Data: Recovered{}
@@ -61,13 +78,19 @@ local function check_neighbors(node, text, label)
     local actual = text:sub(start_byte + 1, end_byte)
     assert(not actual:find('broken', 1, true), label .. ': neighboring declaration absorbed damaged text')
   end
-  local captures = {}
-  for id, capture in highlights:iter_captures(node, text, 0, -1) do
-    captures[highlights.captures[id] .. ':' .. vim.treesitter.get_node_text(capture, text)] = true
-  end
-  for _, capture in ipairs({ 'function:before', 'type.definition:Recovered', 'function:recovered_law',
-    'function:after', 'variable.parameter:x', 'function.call:g', 'number:42' }) do
-    assert(captures[capture], label .. ': lost highlight ' .. capture)
+  for name, wanted in pairs({
+    before = { 'function:before' },
+    Recovered = { 'type.definition:Recovered', 'constructor:Recovered' },
+    recovered_law = { 'function:recovered_law' },
+    after = { 'function:after', 'variable.parameter:x', 'function.call:g', 'number:42' },
+  }) do
+    local captures = {}
+    for id, capture in highlights:iter_captures(definitions[name], text, 0, -1) do
+      captures[highlights.captures[id] .. ':' .. vim.treesitter.get_node_text(capture, text)] = true
+    end
+    for _, capture in ipairs(wanted) do
+      assert(captures[capture], label .. ': lost highlight ' .. capture .. ' in ' .. name)
+    end
   end
 end
 local function position(text, offset)
@@ -109,7 +132,14 @@ for _, case in ipairs(cases) do
     local broken, fixed = prefix .. case[2] .. suffix, prefix .. case[3] .. suffix
     local expected = parse(fixed)
     assert(not expected:has_error(), case[1] .. ': invalid control fixture')
-    check_neighbors(parse(broken), broken, case[1])
+    local function check_damaged(node, label)
+      if case[4] then
+        assert(node:has_error(), label .. ': broken match must remain an error')
+      else
+        check_neighbors(node, broken, label)
+      end
+    end
+    check_damaged(parse(broken), case[1])
     local buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(fixed:sub(1, -2), '\n', { plain = true }))
     local parser = vim.treesitter.get_parser(buf, 'bend2')
@@ -117,15 +147,19 @@ for _, case in ipairs(cases) do
     for _ = 1, 2 do
       edit(buf, fixed, broken)
       local damaged = parser:parse()[1]:root()
-      check_neighbors(damaged, broken, case[1] .. ' (incremental)')
+      check_damaged(damaged, case[1] .. ' (incremental)')
       assert(vim.deep_equal(signature(damaged), signature(parse(broken))), case[1] .. ': incremental error tree differs')
       edit(buf, broken, fixed)
       assert(vim.deep_equal(signature(parser:parse()[1]:root()), signature(expected)), case[1] .. ': repair differs')
     end
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
-  if ok then print('PASS ' .. case[1]) else failed[#failed + 1] = tostring(err); print('FAIL ' .. tostring(err)) end
+  if ok then
+    print('PASS ' .. case[1] .. (case[4] and ' (consistency/repair only)' or ''))
+  else
+    failed[#failed + 1] = tostring(err); print('FAIL ' .. tostring(err))
+  end
 end
 assert(#failed == 0, table.concat(failed, '\n'))
-print(('Recovery: %d editing scenarios preserve neighboring declarations and highlight captures.'):format(#cases))
+print(('Recovery: %d locality/highlight scenarios; %d additional match repair/consistency scenarios.'):format(locality_count, #cases - locality_count))
 vim.cmd('qa!')
