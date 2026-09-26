@@ -57,6 +57,7 @@
     "test": "tree-sitter test",
     "test:bindings": "node --test bindings/node/*_test.js",
     "test:neovim": "tree-sitter build -o build/bend2.so && nvim --headless -u NONE -l scripts/test-neovim.lua",
-    "test:upstream": "node scripts/validate-upstream.mjs"
+    "test:upstream": "node scripts/validate-upstream.mjs",
+    "test:docs": "tree-sitter build -o build/bend2.so && nvim --headless -u NONE -l scripts/test-docs.lua"
   }
 }

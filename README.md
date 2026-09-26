@@ -5,7 +5,15 @@ indentation, textobjects, locals, symbol tags and treesitter-context queries.
 This is **not** the older Bend/HVM language grammar.
 
 Syntax reference: Bend **2.0.29**, checkout `574b6d39`, specifically
-[`bend2/bend.ts`](../bend/bend2/bend.ts).
+[`bend2/bend.ts`](https://github.com/bendlang/bend/blob/574b6d39a235b539eb19a5c532993a0abb3d11ad/bend2/bend.ts).
+
+## Installation
+
+See the [Neovim installation guide](docs/neovim.md) for a complete **lazy.nvim /
+nvim-treesitter main** setup, HTTPS GitHub installation, optional local checkouts,
+legacy `master`, manual installation, editor features and troubleshooting.
+
+For an already-configured `main` setup, see the short registration example below.
 
 ## Build and test (offline)
 
@@ -28,6 +36,10 @@ node scripts/validate-upstream.mjs ../bend
 ```
 
 Equivalent npm scripts: `generate`, `test`, `test:neovim`, `test:upstream`.
+`npm run test:docs` checks the installation snippets in a temporary Neovim
+runtime without network access or changes to user configuration. It requires an
+installed main-branch nvim-treesitter checkout; set `BEND2_NVIM_TREESITTER` to its
+path if it is not under `stdpath('data') .. '/lazy/nvim-treesitter'`.
 `test:bindings` retains the scaffold's Node binding test, requiring its npm
 dependencies to be installed separately.
 
@@ -52,25 +64,25 @@ rejected fixtures require review against the baseline. No Bend code, foreign
 effects, import resolution or network requests are executed by this sweep.
 A clean Tree-sitter tree is not proof that a program typechecks.
 
-## Neovim: nvim-treesitter `main`
+## Neovim: existing nvim-treesitter `main` setup
 
-Keep the existing **`bend` filetype** (including any Bend2 LSP autocmd), and map
-it to the **`bend2` parser**. No user configuration is changed by this repo.
-
-Place this at the **start of your existing nvim-treesitter `config` function**,
-before computing `get_available()` or installing parsers:
+Keep filetype **`bend`** (including existing LSP configuration), and map it to
+parser **`bend2`**. Place this at the **start of your existing nvim-treesitter
+`config` function**, before computing `get_available()` or installing parsers:
 
 ```lua
 local function register_bend2()
   require('nvim-treesitter.parsers').bend2 = {
     install_info = {
-      path = '<path>/<to>/tree-sitter-bend2/', -- your local checkout
+      url = 'https://github.com/Soulthym/tree-sitter-bend2',
       queries = 'queries',
+      -- revision = '<commit-sha>', -- optional: pin a tested parser revision
     },
   }
 end
 register_bend2()
 vim.api.nvim_create_autocmd('User', {
+  group = vim.api.nvim_create_augroup('Bend2ParserRegistration', { clear = true }),
   pattern = 'TSUpdate',
   callback = register_bend2,
 })
@@ -78,46 +90,35 @@ vim.filetype.add({ extension = { bend = 'bend' } })
 vim.treesitter.language.register('bend2', 'bend')
 ```
 
-Adjust the checkout path if necessary, then run **`:TSInstall bend2`**.
-This uses the local checkout, not an SSH/Git remote. Your existing FileType
-callback can start highlighting and `nvim-treesitter` indentation as usual.
-After modifying the grammar, regenerate it and run `:TSUpdate bend2`.
+Restart Neovim, run **`:TSInstall bend2`**, wait for completion, then reopen a
+`.bend` file. This installs from GitHub over HTTPS without an SSH key or a local
+checkout. Use `:TSUpdate bend2` for updates, then restart to reload the parser.
 
-Optional folding (your config currently leaves it disabled):
+**Highlighting is not automatically enabled by installation.** If your existing
+FileType callback does not call `vim.treesitter.start()`, use the
+[complete lazy.nvim example](docs/neovim.md#nvim-treesitter-main--lazynvim).
+It also enables query-based indentation. Verify with `:set filetype?` and
+`:InspectTree`; see [troubleshooting](docs/neovim.md#troubleshooting-missing-highlighting)
+if colors are missing.
 
-```lua
-vim.api.nvim_create_autocmd('FileType', {
-  pattern = 'bend',
-  callback = function()
-    vim.wo.foldmethod = 'expr'
-    vim.wo.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
-    vim.bo.commentstring = '# %s'
-    vim.bo.shiftwidth = 2
-  end,
-})
-```
+### Optional local checkout
 
-Your installed treesitter-context plugin can use `context.scm` automatically.
-Textobject captures need a consumer; for your existing mini.ai setup, add:
+For local development, replace `install_info` above with:
 
 ```lua
-local ai = require('mini.ai')
-ai.setup({
-  n_lines = 500,
-  custom_textobjects = {
-    f = ai.gen_spec.treesitter({ a = '@function.outer', i = '@function.inner' }),
-    c = ai.gen_spec.treesitter({ a = '@class.outer', i = '@class.inner' }),
-    o = ai.gen_spec.treesitter({ a = '@conditional.outer', i = '@conditional.inner' }),
-  },
-})
+install_info = {
+  path = '<path>/<to>/tree-sitter-bend2/', -- replace with your local checkout
+  queries = 'queries',
+},
 ```
 
-### Direct installation without a plugin installer
-
-Alternatively, compile into a temporary location and copy `bend2.so` into
-`stdpath('data') .. '/site/parser/'`, and the contents of `queries/` into
-`stdpath('data') .. '/site/queries/bend2/'`. Register `bend2` for `bend` as above
-and call `vim.treesitter.start()` for Bend buffers. Do not install both ways.
+Use an absolute path and omit `url`/`revision`. The checkout must already exist.
+After editing the grammar, run `tree-sitter generate` there, then `:TSUpdate bend2`
+and restart Neovim. See the guide for a
+[checkout under the Neovim config directory](docs/neovim.md#local-development-checkout),
+[legacy master](docs/neovim.md#legacy-nvim-treesitter-master),
+[manual installation](docs/neovim.md#manual-installation-without-nvim-treesitter)
+and [folding, context and textobjects](docs/neovim.md#optional-editor-features).
 
 ## Syntax and scope
 
