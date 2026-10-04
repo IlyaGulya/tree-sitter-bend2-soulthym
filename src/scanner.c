@@ -15,9 +15,10 @@ enum Token {
 };
 enum Kind { BODY, MATCH, DO, PAR, LAMBDA, WRITE };
 typedef struct { uint32_t column, first; uint8_t kind; } Frame;
-#define MAX_FRAMES 100
-_Static_assert(3 + 9 * MAX_FRAMES <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE,
-               "scanner state must fit Tree-sitter's serialization buffer");
+#define MAX_FRAMES 200
+_Static_assert(MAX_FRAMES <= UINT8_MAX, "frame count must fit in one byte");
+// Only MATCH uses `first`. Other frames need five bytes, not nine. Reserve
+// the exact serialized size when pushing; never truncate a live stack.
 typedef struct { uint8_t size; bool declaration_name, closed_string; Frame frames[MAX_FRAMES]; } Scanner;
 
 static bool space(int32_t c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
@@ -78,6 +79,9 @@ static bool typed_assignment(TSLexer *l) {
 }
 static bool push(Scanner *s, uint8_t kind, uint32_t column) {
   if (s->size == MAX_FRAMES) return false;
+  unsigned bytes = 3 + 5 * (s->size + 1) + (kind == MATCH ? 4 : 0);
+  for (unsigned i = 0; i < s->size; ++i) bytes += s->frames[i].kind == MATCH ? 4 : 0;
+  if (bytes > TREE_SITTER_SERIALIZATION_BUFFER_SIZE) return false;
   s->frames[s->size++] = (Frame){column, UINT32_MAX, kind};
   return true;
 }
@@ -98,7 +102,8 @@ unsigned tree_sitter_bend2_external_scanner_serialize(void *p, char *b) {
     Frame f = s->frames[i];
     b[n++] = (char)f.kind;
     for (unsigned j = 0; j < 4; ++j) b[n++] = (char)(f.column >> (8*j));
-    for (unsigned j = 0; j < 4; ++j) b[n++] = (char)(f.first >> (8*j));
+    if (f.kind == MATCH)
+      for (unsigned j = 0; j < 4; ++j) b[n++] = (char)(f.first >> (8*j));
   }
   return n;
 }
@@ -106,17 +111,25 @@ void tree_sitter_bend2_external_scanner_deserialize(void *p, const char *b, unsi
   Scanner *s = p;
   s->size = 0;
   s->declaration_name = s->closed_string = false;
-  if (n < 3 || (uint8_t)b[0] > MAX_FRAMES || n != 3u + 9u*(uint8_t)b[0]) return;
+  if (n < 3 || n > TREE_SITTER_SERIALIZATION_BUFFER_SIZE || (uint8_t)b[0] > MAX_FRAMES
+      || (uint8_t)b[1] > 1 || (uint8_t)b[2] > 1) return;
+  unsigned at = 3;
+  for (unsigned i = 0; i < (uint8_t)b[0]; ++i) {
+    if (n - at < 5) return;
+    Frame *f = &s->frames[i];
+    f->kind = (uint8_t)b[at++]; f->column = 0; f->first = UINT32_MAX;
+    if (f->kind > WRITE) return;
+    for (unsigned j = 0; j < 4; ++j) f->column |= (uint32_t)(uint8_t)b[at++] << (8*j);
+    if (f->kind == MATCH) {
+      if (n - at < 4) return;
+      f->first = 0;
+      for (unsigned j = 0; j < 4; ++j) f->first |= (uint32_t)(uint8_t)b[at++] << (8*j);
+    }
+  }
+  if (at != n) return;
   s->size = (uint8_t)b[0];
   s->declaration_name = b[1] != 0;
   s->closed_string = b[2] != 0;
-  unsigned at = 3;
-  for (unsigned i = 0; i < s->size; ++i) {
-    Frame *f = &s->frames[i];
-    f->kind = (uint8_t)b[at++]; f->column = f->first = 0;
-    for (unsigned j = 0; j < 4; ++j) f->column |= (uint32_t)(uint8_t)b[at++] << (8*j);
-    for (unsigned j = 0; j < 4; ++j) f->first |= (uint32_t)(uint8_t)b[at++] << (8*j);
-  }
 }
 bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v) {
   Scanner *s = p;
