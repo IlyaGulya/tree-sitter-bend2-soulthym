@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const root = fs.realpathSync(process.argv[2] ?? path.join(repo, '../bend'));
+const root = fs.realpathSync(process.argv[2] ?? process.env.BEND2_UPSTREAM ?? path.join(repo, '../bend'));
 function walk(dir) {
   return fs.readdirSync(dir, {withFileTypes: true}).flatMap(e => {
     if (e.name === '.git' || e.name === 'node_modules') return [];
@@ -19,7 +20,9 @@ if (!files.length) throw new Error(`No .bend files in ${root}`);
 fs.mkdirSync(path.join(repo, 'build'), {recursive: true});
 const list = path.join(repo, 'build/upstream-paths.txt');
 fs.writeFileSync(list, files.join('\n') + '\n');
-const run = spawnSync('tree-sitter', ['parse', '--paths', list, '--quiet', '--json-summary', '--timeout', '10000000'], {
+const library = process.env.BEND2_PARSER ? fs.realpathSync(process.env.BEND2_PARSER) : null;
+const parserArgs = library ? ['--lib-path', library, '--lang-name', 'bend2'] : [];
+const run = spawnSync('tree-sitter', ['parse', ...parserArgs, '--paths', list, '--quiet', '--json-summary', '--timeout', '10000000'], {
   cwd: repo, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 180000,
 });
 if (run.error) throw run.error;
@@ -43,9 +46,16 @@ const baselinePath = path.join(repo, 'test/upstream-rejections.json');
 const baseline = fs.existsSync(baselinePath) ? JSON.parse(fs.readFileSync(baselinePath, 'utf8')) : null;
 const newRejections = baseline ? failures.filter(p => !baseline.files.includes(p.file)) : unexpected;
 const noLongerRejected = baseline ? baseline.files.filter(f => results.some(p => p.file === f && p.successful)) : [];
-const report = {reference: root, total: results.length, clean: results.length - failures.length,
-  rejected: failures.length, rejectedNonDiagnostic: unexpected.length, results};
-const out = path.join(repo, 'build/upstream-report.json');
+const stdlib = results.filter(p => p.file.startsWith('bend2/')).map(p => {
+  const text = fs.readFileSync(path.join(root, p.file));
+  return {file: p.file, successful: p.successful, bytes: text.length,
+    lines: text.toString('utf8').split('\n').length - 1,
+    sha256: createHash('sha256').update(text).digest('hex')};
+});
+if (!stdlib.some(p => p.file === 'bend2/base.bend')) throw new Error('Incomplete checkout: missing standard library');
+const report = {reference: root, parserLibrary: library, total: results.length, clean: results.length - failures.length,
+  rejected: failures.length, rejectedNonDiagnostic: unexpected.length, stdlib, results};
+const out = path.resolve(process.env.BEND2_REPORT ?? path.join(repo, 'build/upstream-report.json'));
 fs.writeFileSync(out, JSON.stringify(report, null, 2) + '\n');
 console.log(`${report.total} files: ${report.clean} clean, ${report.rejected} rejected, ${unexpected.length} rejected non-diagnostic fixtures.`);
 console.log('Diagnostic fixtures include semantic/runtime errors: this classification alone is NOT a syntax oracle.');
