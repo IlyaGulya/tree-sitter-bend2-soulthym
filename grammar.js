@@ -29,9 +29,6 @@ export default grammar({
   conflicts: $ => [
     [$.body, $.binding],
     [$.type_application, $._atom],
-    [$._expression, $._generic_argument],
-    [$._expression, $._domain_expression],
-    [$._expression, $._write_value],
   ],
   rules: {
     source_file: $ => seq(repeat($.import_statement), repeat($._declaration)),
@@ -115,19 +112,22 @@ export default grammar({
     escape_sequence: $ => token.immediate(/\\([ntr0\\'"]|[uU]\{[0-9a-fA-F]{1,8}\})/),
     hole: $ => seq('?', field('name', $.identifier)),
     constructor_expression: $ => seq(field('name', $.identifier), token.immediate('{'), args($._expression), '}'),
-    _glued_comparison: $ => prec.left(4, seq(field('left', $._expression),
+    // Glued comparisons and postfix operations bind to an atomic head. A
+    // general expression here lets recovery consume a forbidden type operator
+    // while waiting for another postfix token, then discard the declaration.
+    _glued_comparison: $ => prec.left(4, seq(field('left', $._atom),
       field('operator', alias($._glued_lt, '<')), field('right', $._generic_argument), $._glued_comparison_end)),
     type_application: $ => seq(field('name', $.identifier), choice(alias($._lt, '<'), alias($._glued_lt, '<')),
       field('argument', $._generic_argument), choice($._type_close,
         seq(',', args(field('argument', $._expression)), $._type_close))),
     _type_close: $ => choice('>', alias($._gt, '>')),
-    call_expression: $ => prec.left(14, seq(field('function', $._expression),
+    call_expression: $ => prec.left(14, seq(field('function', $._atom),
       field('arguments', $.arguments))),
     arguments: $ => seq(choice(alias($._call_open, '('), $.gpu_call),
       repeat(seq(field('argument', $.template_argument), optional(','))), args(field('argument', $._expression)), ')'),
     gpu_call: $ => '!(',
     template_argument: $ => seq('~', $._expression),
-    index_expression: $ => prec.left(14, seq(field('array', $._expression), alias($._index_open, '['), field('index', $._expression), ']')),
+    index_expression: $ => prec.left(14, seq(field('array', $._atom), alias($._index_open, '['), field('index', $._expression), ']')),
     array_write: $ => prec.right(1, seq(field('target', $.index_expression), '<-', field('value', $._write_value))),
     binary_expression: $ => binary($, $._expression, 0),
     reusable_expression: $ => prec(12, seq('+', $._expression)),

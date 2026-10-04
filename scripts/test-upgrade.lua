@@ -57,6 +57,32 @@ for _, expression in ipairs({
 }) do
   check('comparison/type control ' .. expression, 'def f() -> T: ' .. expression .. '\n', false)
 end
+-- Postfix/glued operations bind within arithmetic operands; accepting the
+-- tokens is insufficient if the CST assigns them to the wrong expression.
+for _, case in ipairs({
+  { '1<2 + 3 * 4', '<', '2 + 3 * 4' },
+  { '1 + 2<3', '+', '2<3' },
+  { '1<2 << 3', '<', '2 << 3' },
+  { '1<2<3', '<', '2<3' },
+  { '1<2(3)', '<', '2(3)' },
+  { '1<2[3]', '<', '2[3]' },
+  { '1 + f(2)', '+', 'f(2)' },
+  { '1 + a[2]', '+', 'a[2]' },
+  { '(f)(2)(3)', nil, nil },
+  { '(a + b)[2]', nil, nil },
+  { 'F<A, B & C>', nil, nil },
+  { 'F<A, B | C>', nil, nil },
+  { 'F<A, B -> C>', nil, nil },
+}) do
+  check('precedence/recovery control ' .. case[1], 'def f() -> T: ' .. case[1] .. '\n', false, function(node, text)
+    if not case[2] then return end
+    local expr = node:named_child(0):field('body')[1]:named_child(0)
+    assert(expr:type() == 'binary_expression', 'lost binary expression')
+    local op, rhs = expr:field('operator')[1], expr:field('right')[1]
+    assert(op and vim.treesitter.get_node_text(op, text) == case[2], 'wrong root operator')
+    assert(rhs and vim.treesitter.get_node_text(rhs, text) == case[3], 'wrong right-operand ownership')
+  end)
+end
 -- Verified with Bend.parse_term: these are interpreted as attempted family
 -- applications, not chained numeric comparisons (the family head is invalid).
 for _, expression in ipairs({ '1<2 > 3', '1<2 >= 3' }) do

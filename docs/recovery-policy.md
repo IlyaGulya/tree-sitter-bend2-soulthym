@@ -74,6 +74,6 @@ separately; do not imply tolerance for every malformed byte sequence. Keep
 recovery limitations visible in the README and add focused tests as they improve.
 
 See [`scripts/test-recovery.lua`](../scripts/test-recovery.lua) for locality,
-highlight, field, fold/tag and break/repair checks, and
+highlight, field, structural-query and break/repair checks, and
 [`scripts/test-upgrade.lua`](../scripts/test-upgrade.lua) for release compatibility
 and incremental checks. The two suites complement, not replace, one another.

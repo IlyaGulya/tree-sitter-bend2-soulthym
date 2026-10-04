@@ -1,7 +1,7 @@
 -- Error locality and highlight recovery, including real broken/repaired buffer
 -- edits. Run from the repo after: tree-sitter build -o build/bend2.so
 local root = vim.fn.getcwd()
-vim.treesitter.language.add('bend2', { path = root .. '/build/bend2.so' })
+vim.treesitter.language.add('bend2', { path = vim.env.BEND2_PARSER or (root .. '/build/bend2.so') })
 local highlights = vim.treesitter.query.parse('bend2', table.concat(vim.fn.readfile('queries/highlights.scm'), '\n'))
 
 local cases = {
@@ -30,6 +30,30 @@ local cases = {
   { 'multiline closing quote', 'def broken() -> String: "first\nsecond', 'def broken() -> String: "first\nsecond"' },
   { 'distant closing quote', 'def broken() -> String: "' .. ('line\n'):rep(400), 'def broken() -> String: "' .. ('line\n'):rep(400) .. '"' },
 }
+-- A rejected typo must not cost the surrounding declaration its useful CST.
+for _, gap in ipairs({
+  { 'space', ' ' }, { 'tab', '\t' }, { 'newline', '\n' },
+  { 'CRLF', '\r\n' }, { 'comment', ' # comment\n' },
+}) do
+  local tail = '?(x: U32) -> U32:\n  g(7)'
+  cases[#cases + 1] = { 'unsafe suffix after ' .. gap[1],
+    'def broken' .. gap[2] .. tail, 'def broken' .. tail, false, true }
+end
+for _, op in ipairs({ '&', '|', '->' }) do
+  local term = 'A ' .. op .. ' B'
+  cases[#cases + 1] = { 'compound parameter argument ' .. op,
+    'def broken(x: F<' .. term .. '>) -> U32:\n  g(7)',
+    'def broken(x: F<(' .. term .. ')>) -> U32:\n  g(7)', false, 'parameter' }
+  cases[#cases + 1] = { 'unfinished compound body argument ' .. op,
+    'def broken(x: U32) -> U32:\n  F<' .. term,
+    'def broken(x: U32) -> U32:\n  F<(' .. term .. ')>', false, 'body' }
+end
+local structure_queries = {}
+for file, capture in pairs({ folds = 'fold', tags = 'definition.function', context = 'context',
+  textobjects = 'function.outer', locals = 'local.scope', indents = 'indent.begin' }) do
+  structure_queries[file] = { capture = capture, query = vim.treesitter.query.parse('bend2',
+    table.concat(vim.fn.readfile('queries/' .. file .. '.scm'), '\n')) }
+end
 local locality_count = #cases
 -- Known limits: later arms in the SAME damaged match can still be swallowed.
 -- Exercise repair/incremental consistency without enshrining today's error
@@ -93,6 +117,55 @@ local function check_neighbors(node, text, label)
     end
   end
 end
+local function check_edited_function(node, text, label, damaged_field)
+  local def
+  for child in node:iter_children() do
+    local name = child:field('name')[1]
+    if name and vim.treesitter.get_node_text(name, text) == 'broken' then def = child end
+  end
+  assert(def and def:type() == 'function_definition', label .. ': lost the edited function')
+  assert(def:has_error(), label .. ': error detached from the edited function')
+  for _, field in ipairs({ 'name', 'parameters', 'return_type', 'body' }) do
+    local part = def:field(field)[1]
+    local affected = (damaged_field == 'parameter' and field == 'parameters') or (damaged_field == 'body' and field == 'body')
+    assert(part and (affected or not part:has_error()), label .. ': damaged intact field ' .. field)
+  end
+  if damaged_field ~= 'body' then
+    assert(vim.treesitter.get_node_text(def:field('body')[1], text) == 'g(7)', label .. ': changed function body')
+  end
+  local captures = {}
+  for id, capture in highlights:iter_captures(def, text, 0, -1) do
+    captures[highlights.captures[id] .. ':' .. vim.treesitter.get_node_text(capture, text)] = true
+  end
+  local wanted = { 'function:broken', 'variable.parameter:x' }
+  if damaged_field ~= 'body' then vim.list_extend(wanted, { 'function.call:g', 'number:7' }) end
+  for _, capture in ipairs(wanted) do
+    assert(captures[capture], label .. ': lost edited-function highlight ' .. capture)
+  end
+  local _, _, start_byte = def:field('name')[1]:end_()
+  local _, _, end_byte = def:field('parameters')[1]:start()
+  if damaged_field == 'parameter' or damaged_field == 'body' then
+    local affected = def:field(damaged_field == 'parameter' and 'parameters' or 'body')[1]
+    _, _, start_byte = affected:start()
+    _, _, end_byte = affected:end_()
+  end
+  local function check_errors(n)
+    if n:type() == 'ERROR' or n:missing() then
+      local _, _, a = n:start()
+      local _, _, b = n:end_()
+      assert(a >= start_byte and b <= end_byte, label .. ': error escaped the damaged field')
+    end
+    for child in n:iter_children() do check_errors(child) end
+  end
+  check_errors(def)
+  for file, spec in pairs(structure_queries) do
+    local found = false
+    for id, capture in spec.query:iter_captures(def, text, 0, -1) do
+      found = found or (spec.query.captures[id] == spec.capture and capture:id() == def:id())
+    end
+    assert(found, label .. ': lost ' .. file .. ' capture for edited function')
+  end
+end
 local function position(text, offset)
   local preceding = text:sub(1, offset)
   local _, row = preceding:gsub('\n', '')
@@ -137,6 +210,7 @@ for _, case in ipairs(cases) do
         assert(node:has_error(), label .. ': broken match must remain an error')
       else
         check_neighbors(node, broken, label)
+        if case[5] then check_edited_function(node, broken, label, case[5]) end
       end
     end
     check_damaged(parse(broken), case[1])

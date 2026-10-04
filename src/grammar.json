@@ -3514,7 +3514,7 @@
             "name": "left",
             "content": {
               "type": "SYMBOL",
-              "name": "_expression"
+              "name": "_atom"
             }
           },
           {
@@ -3668,7 +3668,7 @@
             "name": "function",
             "content": {
               "type": "SYMBOL",
-              "name": "_expression"
+              "name": "_atom"
             }
           },
           {
@@ -3793,7 +3793,7 @@
             "name": "array",
             "content": {
               "type": "SYMBOL",
-              "name": "_expression"
+              "name": "_atom"
             }
           },
           {
@@ -5588,18 +5588,6 @@
     [
       "type_application",
       "_atom"
-    ],
-    [
-      "_expression",
-      "_generic_argument"
-    ],
-    [
-      "_expression",
-      "_domain_expression"
-    ],
-    [
-      "_expression",
-      "_write_value"
     ]
   ],
   "precedences": [],
