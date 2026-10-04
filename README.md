@@ -4,8 +4,11 @@ Tree-sitter grammar for **Bend 2**, with Neovim highlighting, folding,
 indentation, textobjects, locals, symbol tags and treesitter-context queries.
 This is **not** the older Bend/HVM language grammar.
 
-Syntax reference: Bend **2.0.29**, checkout `574b6d39`, specifically
-[`bend2/bend.ts`](https://github.com/bendlang/bend/blob/574b6d39a235b539eb19a5c532993a0abb3d11ad/bend2/bend.ts).
+Parser version: **0.2.0** (ABI 15).
+Syntax reference: Bend **2.0.35**, release tag **`v2.0.35`**, specifically
+[`bend2/bend.ts` at `79df8d9c`](https://github.com/bendlang/bend/blob/79df8d9c40722ee9507a1e253f283b51025f9d6c/bend2/bend.ts).
+See the [release audit](docs/upgrades/bend-2.0.35.md) for every upstream change,
+old/new parser results, and the distinction between this tag and later `main`.
 
 ## Installation
 
@@ -37,7 +40,10 @@ node scripts/validate-upstream.mjs ../bend
 ```
 
 Equivalent npm scripts: `generate`, `test`, `test:neovim`, `test:recovery`,
-`test:upstream`.
+`test:upstream`. Additional gates: `test:scanner`, `test:upgrade`, `test:stdlib`
+and `test:release`. `npm run test:offline` runs the installed-tool gates,
+including the full upstream sweep; it does not install dependencies or run the
+separate binding suites.
 `npm run test:docs` checks the installation snippets in a temporary Neovim
 runtime without network access or changes to user configuration. It requires an
 installed main-branch nvim-treesitter checkout; set `BEND2_NVIM_TREESITTER` to its
@@ -49,20 +55,25 @@ dependencies to be installed separately.
 
 On the pinned checkout:
 
-- **1,577 / 1,577 `.bend` files visited**, with a per-file timeout.
-- **1,466 clean parses**, including the entire 3,018-line standard library,
+- **1,644 / 1,644 `.bend` files visited**, with a per-file timeout.
+- **1,532 clean parses**, including the entire 3,009-line standard library,
   all demos, all benchmarks and every fixture without an expected diagnostic.
-- **111 rejections**, pinned in `test/upstream-rejections.json`. These contain
+- **112 rejections**, pinned in `test/upstream-rejections.json`. These contain
   malformed or removed syntax. Some upstream goldens stop at an *earlier*
   semantic error, so “expects an error” alone is not used as an exemption.
 - **41 corpus cases**, covering tree shape, precedence, column ownership,
   literals, proofs, do notation, templates, parallel lets, arrays and rejection.
 - All seven queries compile in Neovim **0.12.1**; captures, folds, conventional
   indentation and **180 deterministic incremental edits** are checked.
-- **24 recovery scenarios** additionally check error locality and retained
+- **35 recovery scenarios** additionally check error locality and retained
   highlight captures; **7 damaged-match scenarios** check consistency and repair
   only. Each scenario is broken and repaired twice using minimal buffer edits,
-  comparing complete node types/ranges against fresh parses.
+  comparing complete node types/ranges against fresh parses. Suffix/type-argument
+  cases also check the edited function's fields and captures from all seven
+  query groups (including folds, tags, context, textobjects, locals and indents).
+- **53 upgrade checks** cover syntax boundaries, valid lookalikes, deep nesting
+  and incremental edits. Standalone C tests exercise scanner serialization,
+  full-width columns, all frame kinds, capacity and truncated states.
 
 The sweep writes **every file's result** to `build/upstream-report.json`, not
 just failures. New rejections (including diagnostic fixtures) and formerly
@@ -143,6 +154,12 @@ so there is deliberately no fake C/JS injection query.
 
 ### Recovery while editing
 
+**Policy: preserve useful editor structure through mistakes and report localized
+errors, rather than sacrificing tooling for compiler-like rejection.** Every
+applicable grammar, scanner, query and upgrade change follows the
+[error-tolerant parsing policy](docs/recovery-policy.md). Tightening syntax needs
+structure/capture and break/repair tests, not just a rejection assertion.
+
 Recovery tests require real syntax errors, intact neighboring `def`/`type`/`law`
 nodes, and preserved function, type, parameter, call and number captures. They
 cover missing delimiters, headers, bodies and let values; unfinished parallel
@@ -173,9 +190,11 @@ syntax error restores the complete tree.
 - Pattern positions retain expression-shaped CST nodes; syntactic locals cover
   simple binders conservatively, not all nested destructuring or dependent
   name resolution. Use the LSP for authoritative references and definitions.
-- The serializable scanner supports **100 simultaneously active layout/counting
-  frames** (not 100 parentheses). Excessive nesting fails safely instead of
-  overflowing Tree-sitter's 1,024-byte serialization buffer.
+- The serializable scanner supports **up to 200 simultaneously active
+  layout/counting frames** (not 200 parentheses), subject to the 1,024-byte
+  serialized-state budget. Ordinary frames use five bytes, match frames nine,
+  plus a three-byte header. Excessive nesting fails safely; state is never
+  silently truncated.
 - Lambda `: T =` lookahead is lexical rather than an embedded second Bend
   parser. Exotic malformed types may recover differently. Source columns use
   Tree-sitter's column API; unusual Unicode-containing same-line layout should
@@ -188,7 +207,9 @@ syntax error restores the complete tree.
 
 ## Updating the language reference
 
-Review upstream parser/loader changes first, add positive and negative corpus
-cases with reviewed trees, regenerate, run the complete sweep and editor tests,
+Pin a Bend release tag and its commit, not `main`. Review upstream parser/loader
+changes first and apply the [recovery policy](docs/recovery-policy.md). Add
+positive, negative and editing cases with reviewed trees, regenerate, run the
+complete sweep and editor tests,
 and review changes to the rejection baseline. Never blindly approve generated
 expected trees or treat all diagnostic fixtures as syntactically invalid.

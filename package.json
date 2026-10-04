@@ -1,6 +1,6 @@
 {
   "name": "tree-sitter-bend2",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Bend2 tree-sitter-parser",
   "type": "module",
   "repository": {
@@ -23,6 +23,9 @@
     "bend2"
   ],
   "files": [
+    "LICENSE",
+    "CHANGELOG.md",
+    "docs/**/*.md",
     "grammar.js",
     "tree-sitter.json",
     "binding.gyp",
@@ -56,6 +59,11 @@
     "generate": "tree-sitter generate",
     "test": "tree-sitter test",
     "test:bindings": "node --test bindings/node/*_test.js",
+    "test:scanner": "mkdir -p build && cc -std=c11 -Wall -Wextra -Werror -Isrc scripts/test-scanner.c -o build/test-scanner && build/test-scanner",
+    "test:upgrade": "tree-sitter build -o build/bend2.so && nvim --headless -u NONE -l scripts/test-upgrade.lua",
+    "test:stdlib": "tree-sitter build -o build/bend2.so && nvim --headless -u NONE -l scripts/test-stdlib.lua",
+    "test:release": "node scripts/test-release.mjs",
+    "test:offline": "npm test && npm run test:scanner && npm run test:upgrade && npm run test:neovim && npm run test:recovery && npm run test:docs && npm run test:stdlib && npm run test:upstream && npm run test:release",
     "test:neovim": "tree-sitter build -o build/bend2.so && nvim --headless -u NONE -l scripts/test-neovim.lua",
     "test:upstream": "node scripts/validate-upstream.mjs",
     "test:recovery": "tree-sitter build -o build/bend2.so && nvim --headless -u NONE -l scripts/test-recovery.lua",
