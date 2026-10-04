@@ -23,7 +23,8 @@ export default grammar({
     $._write_start, $._write_more, $._write_end, $._import_start, $._import_end,
     $.integer, $.natural, $.float, $.identifier,
     $._def_keyword, $._type_keyword, $._law_keyword, $._declaration_name,
-    $._string_start, $._string_newline, $._error_sentinel,
+    $._string_start, $._string_newline,
+    $._lt, $._glued_lt, $._glued_comparison_end, $._error_sentinel,
   ],
   conflicts: $ => [
     [$.body, $.binding],
@@ -43,7 +44,7 @@ export default grammar({
     // external variants recognize fresh headers and discard stale layout state.
     function_definition: $ => seq(optional($.decorator), choice('def', alias($._def_keyword, 'def')),
       field('name', alias($._declaration_name, $.identifier)),
-      optional('?'), field('parameters', $.parameters), optional(seq('->', field('return_type', $._expression))),
+      optional(token.immediate('?')), field('parameters', $.parameters), optional(seq('->', field('return_type', $._expression))),
       ':', field('body', choice($.foreign_body, seq($._function_start, $.body, $._body_end)))),
     decorator: $ => seq('@', 'unsafe'),
     parameters: $ => seq('(', args($.parameter), ')'),
@@ -96,7 +97,8 @@ export default grammar({
     _atom: $ => choice(
       $.identifier, $.builtin_type, $.kind_expression, $.quantity, $.integer, $.natural, $.float,
       $.natural_successor, $.character, $.string, $.hole, $.constructor_expression,
-      $.type_application, $.call_expression, $.index_expression, $.array_write,
+      $.type_application, alias($._glued_comparison, $.binary_expression),
+      $.call_expression, $.index_expression, $.array_write,
       $.reusable_expression, $.dependent_type,
       $.annotation_expression, $.equality_expression, $.reflexivity, $.rewrite_expression,
       $.eliminator, $.parenthesized_expression, $.tuple_expression, $.list_expression,
@@ -113,8 +115,12 @@ export default grammar({
     escape_sequence: $ => token.immediate(/\\([ntr0\\'"]|[uU]\{[0-9a-fA-F]{1,8}\})/),
     hole: $ => seq('?', field('name', $.identifier)),
     constructor_expression: $ => seq(field('name', $.identifier), token.immediate('{'), args($._expression), '}'),
-    type_application: $ => seq(field('name', $.identifier), '<',
-      field('argument', $._generic_argument), choice('>', seq(',', args(field('argument', $._expression)), '>'))),
+    _glued_comparison: $ => prec.left(4, seq(field('left', $._expression),
+      field('operator', alias($._glued_lt, '<')), field('right', $._generic_argument), $._glued_comparison_end)),
+    type_application: $ => seq(field('name', $.identifier), choice(alias($._lt, '<'), alias($._glued_lt, '<')),
+      field('argument', $._generic_argument), choice($._type_close,
+        seq(',', args(field('argument', $._expression)), $._type_close))),
+    _type_close: $ => choice('>', alias($._gt, '>')),
     call_expression: $ => prec.left(14, seq(field('function', $._expression),
       field('arguments', $.arguments))),
     arguments: $ => seq(choice(alias($._call_open, '('), $.gpu_call),
@@ -162,7 +168,7 @@ function commaSep1(rule) { return seq(rule, repeat(seq(',', rule))); }
 function binary($, operand, minimum) {
   return choice(...[
     [0, '->', true], [1, '&', true], [1, '|', true], [2, '||'], [3, '&&'],
-    [4, '<'], [4, '<='], [4, alias($._gt, '>')], [4, alias($._ge, '>=')],
+    [4, alias($._lt, '<')], [4, '<='], [4, alias($._gt, '>')], [4, alias($._ge, '>=')],
     [5, '<>', true], [5, '++', true], [5, '<&>', true],
     [6, '.|.'], [7, '.^.'], [8, '.&.'], [9, '<<'], [9, alias($._shr, '>>')],
     [10, alias($._plus, '+')], [10, alias($._minus, '-')],

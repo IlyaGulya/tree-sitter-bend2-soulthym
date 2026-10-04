@@ -11,7 +11,7 @@ enum Token {
   PLUS, MINUS, GT, GE, SHR, MOD, PARALLEL, PARALLEL_START, PARALLEL_VALUE, PARALLEL_END,
   WRITE_START, WRITE_MORE, WRITE_END, IMPORT_START, IMPORT_END, INTEGER, NATURAL, FLOAT, IDENTIFIER,
   DEF_KEYWORD, TYPE_KEYWORD, LAW_KEYWORD, DECLARATION_NAME,
-  STRING_START, STRING_NEWLINE, ERROR_SENTINEL,
+  STRING_START, STRING_NEWLINE, LT, GLUED_LT, GLUED_COMPARISON_END, ERROR_SENTINEL,
 };
 enum Kind { BODY, MATCH, DO, PAR, LAMBDA, WRITE };
 typedef struct { uint32_t column, first; uint8_t kind; } Frame;
@@ -214,6 +214,22 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     l->result_symbol = l->lookahead == '(' ? CALL_OPEN : INDEX_OPEN;
     advance(l); l->mark_end(l); return true;
   }
+  if (l->lookahead == '<' && (v[LT] || v[GLUED_LT])) {
+    advance(l);
+    if (v[GLUED_COMPARISON_END] && (l->lookahead == '=' ||
+        (spaced && !(l->lookahead && strchr("<->&", l->lookahead))))) {
+      l->result_symbol = GLUED_COMPARISON_END; return true;
+    }
+    if (l->lookahead && strchr("<=->", l->lookahead)) return false;
+    l->mark_end(l);
+    if (l->lookahead == '&') {
+      advance(l);
+      if (l->lookahead == '>') return false;
+    }
+    enum Token t = spaced ? LT : GLUED_LT;
+    if (!v[t]) return false;
+    l->result_symbol = t; return true;
+  }
   if (v[FUNCTION_START] || v[BLOCK_START] || v[LAMBDA_START] || v[DO_START]) {
     if (v[CALL_OPEN] && l->lookahead && strchr("&|*/.<", l->lookahead)) return false;
     if (head(l->lookahead)) {
@@ -373,6 +389,19 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     advance(l);
     if (!space(l->lookahead)) return false;
     l->mark_end(l); l->result_symbol = MOD; return true;
+  }
+  if (v[GLUED_COMPARISON_END]) {
+    // Bend 2.0.32: a glued `<` cannot finish its first operand at a type
+    // operator. Boolean operators do terminate it; high-precedence operators
+    // and suffixes must be given a chance to extend that operand first.
+    int32_t c = l->lookahead;
+    if (c == '&' || c == '|') {
+      advance(l);
+      if (l->lookahead != c) return false;
+    } else if (c && strchr("+-*/%.<[(!", c)) {
+      return false;
+    }
+    l->result_symbol = GLUED_COMPARISON_END; return true;
   }
   if (l->lookahead == ';' && (v[DO_MORE] || v[WRITE_MORE])) return false;
   if (l->lookahead == ':' && v[BODY_END] && top && top->kind == LAMBDA) {
