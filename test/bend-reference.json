@@ -1,0 +1,15 @@
+{
+  "version": "2.0.35",
+  "tag": "v2.0.35",
+  "commit": "79df8d9c40722ee9507a1e253f283b51025f9d6c",
+  "previousVersion": "2.0.29",
+  "previousCommit": "574b6d39a235b539eb19a5c532993a0abb3d11ad",
+  "stdlib": [
+    {
+      "file": "bend2/base.bend",
+      "sha256": "c742fae9c49b14f0cc9128429a2c6109364c8a933a142f2c90b9f2e5fd976661",
+      "lines": 3009,
+      "bytes": 71530
+    }
+  ]
+}

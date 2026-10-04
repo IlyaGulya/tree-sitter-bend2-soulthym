@@ -1,5 +1,5 @@
 {
-  "reference": "Bend 2.0.29, 574b6d39",
+  "reference": "Bend v2.0.35, 79df8d9c40722ee9507a1e253f283b51025f9d6c",
   "note": "Reviewed syntax rejection baseline. Includes removed forms and malformed fixtures whose upstream execution can stop at an earlier semantic error. Semantic/runtime diagnostic fixtures are not automatically exempted from regressions. Review changes against bend.ts before updating.",
   "files": [
     "tests/check/array_boxed_default.bend",
@@ -102,6 +102,7 @@
     "tests/parse/reserved_pi_binder.bend",
     "tests/parse/reserved_type_name.bend",
     "tests/parse/reserved_type_param.bend",
+    "tests/parse/type_arg_parens.bend",
     "tests/parse/unclosed_char_code.bend",
     "tests/parse/unicode_forall_dead.bend",
     "tests/parse/unicode_lambda_dead.bend",
