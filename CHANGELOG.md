@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- Preserve following top-level declarations after invalid nested `do` bodies
+  by closing bounded scanner scopes before restarting declaration recovery.
+  Add LF/CRLF break/repair regressions; keep native syntax errors and existing
+  valid-syntax acceptance unchanged.
+- Preserve same-column sibling `case` arms after missing call or constructor
+  closers, including inner/outer match boundaries. Retain native errors,
+  intact arm fields, highlights, folds, context, textobjects, locals and indents
+  through LF/CRLF break/repair edits; other damaged-arm forms remain limited.
+- Expose separate `!` and `(` tokens inside the existing `gpu_call` node.
+  GPU modifier highlights no longer cover the opening bracket, and editor
+  bracket queries can pair its parentheses. Keep `!(` adjacency and useful
+  recovery for whitespace/comment typos and malformed unsafe headers.
+- Highlight eliminator-arm constructor names and unsafe definition suffixes
+  by their roles. A hole's `?` is no longer overridden by an operator capture.
+
 ## 0.2.0
 
 Bend reference: **v2.0.35**, `79df8d9c40722ee9507a1e253f283b51025f9d6c`.

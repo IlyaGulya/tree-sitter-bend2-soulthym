@@ -24,7 +24,7 @@ export default grammar({
     $.integer, $.natural, $.float, $.identifier,
     $._def_keyword, $._type_keyword, $._law_keyword, $._declaration_name,
     $._string_start, $._string_newline,
-    $._lt, $._glued_lt, $._glued_comparison_end, $._error_sentinel,
+    $._lt, $._glued_lt, $._glued_comparison_end, $._error_sentinel, $._gpu_open,
   ],
   conflicts: $ => [
     [$.body, $.binding],
@@ -125,7 +125,7 @@ export default grammar({
       field('arguments', $.arguments))),
     arguments: $ => seq(choice(alias($._call_open, '('), $.gpu_call),
       repeat(seq(field('argument', $.template_argument), optional(','))), args(field('argument', $._expression)), ')'),
-    gpu_call: $ => '!(',
+    gpu_call: $ => seq('!', alias($._gpu_open, '(')),
     template_argument: $ => seq('~', $._expression),
     index_expression: $ => prec.left(14, seq(field('array', $._atom), alias($._index_open, '['), field('index', $._expression), ']')),
     array_write: $ => prec.right(1, seq(field('target', $.index_expression), '<-', field('value', $._write_value))),
