@@ -3766,8 +3766,22 @@
       ]
     },
     "gpu_call": {
-      "type": "STRING",
-      "value": "!("
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "!"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_gpu_open"
+          },
+          "named": false,
+          "value": "("
+        }
+      ]
     },
     "template_argument": {
       "type": "SEQ",
@@ -5755,6 +5769,10 @@
     {
       "type": "SYMBOL",
       "name": "_error_sentinel"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_gpu_open"
     }
   ],
   "inline": [],
