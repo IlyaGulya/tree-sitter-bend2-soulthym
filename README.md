@@ -158,6 +158,22 @@ Indentation queries suggest conventional formatting; they do not define the
 language. Native C/JS foreign imports contain **paths**, not embedded source,
 so there is deliberately no fake C/JS injection query.
 
+Assignments and case arms accept recursive patterns, not arbitrary expressions:
+calls with arguments, indexing and lambdas cannot be patterns, including inside
+constructors, lists, tuples and natural successors. Same-line `f (1)` and
+`f [0]` are still postfix expressions, not separate patterns; a comma or newline
+separates them. Empty `()` suffixes preserve eligible patterns, and `0n+name`
+(including leading-zero spellings) preserves name binders, as in the compiler.
+Typed and parallel lets bind names, not destructuring patterns; grouped/reusable
+names and these identity forms remain supported. Erased `-` lets take a direct
+name. Law templates (`for ~...`) must precede ordinary `for`/`exs` clauses.
+
+Constructor resolution/arity, resolved-name eligibility, literal limits, pattern
+counts and computed-match eligibility remain compiler-owned. `npm run test:syntax`
+checks legal controls, the ten affected official malformed files, neighboring
+declarations, and LF/CRLF incremental rejection/repair; set `BEND2_UPSTREAM` to
+the pinned checkout.
+
 For editor consumers, `gpu_call` still spans `!(`, but now contains separate
 anonymous `!` and `(` children. The modifier capture covers only `!`; bracket
 queries can capture `(` and the enclosing `arguments` node's closing `)`.
