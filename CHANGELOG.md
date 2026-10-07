@@ -12,6 +12,12 @@
 - Correct GPU migration guidance: `gpu_call` changes from a named leaf to a
   composite node, not from a combined anonymous token.
 
+- Reject non-pattern assignment and case terms, destructuring in typed/parallel
+  lets, and law templates after ordinary clauses. Preserve recursive patterns,
+  empty-call and zero-successor identities, optional commas, named CST nodes
+  and following declarations through repair.
+  Add LF/CRLF regressions using all ten affected official malformed fixtures;
+  update the reviewed rejection baseline without exempting new failures.
 - Preserve following top-level declarations after invalid nested `do` bodies
   by closing bounded scanner scopes before restarting declaration recovery.
   Add LF/CRLF break/repair regressions; keep native syntax errors and existing

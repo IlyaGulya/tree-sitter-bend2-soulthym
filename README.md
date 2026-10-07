@@ -53,12 +53,12 @@ dependencies to be installed separately.
 
 ### Validation results
 
-On the pinned checkout:
+On the integrated parser, using the existing 10-second per-file deadline:
 
 - **1,644 / 1,644 `.bend` files visited**, with a per-file timeout.
-- **1,532 clean parses**, including the entire 3,009-line standard library,
-  all demos, all benchmarks and every fixture without an expected diagnostic.
-- **112 rejections**, pinned in `test/upstream-rejections.json`. These contain
+- **1,521 clean parse results**, including the entire 3,009-line standard library,
+  all demos and the completed non-diagnostic fixtures.
+- **122 reviewed syntax rejections**, pinned in `test/upstream-rejections.json`. These contain
   malformed or removed syntax. Some upstream goldens stop at an *earlier*
   semantic error, so “expects an error” alone is not used as an exemption.
 - **41 corpus cases**, covering tree shape, precedence, column ownership,
@@ -86,6 +86,11 @@ On the pinned checkout:
 - **53 upgrade checks** cover syntax boundaries, valid lookalikes, deep nesting
   and incremental edits. Standalone C tests exercise scanner serialization,
   full-width columns, all frame kinds, capacity and truncated states.
+- The 5.7 MB `bench/checker/proofs_3200/main.bend` timed out, producing one
+  additional failed result rather than a syntax-error location. An isolated
+  comparison with unchanged upstream `917295a` also timed out at the same
+  10-second deadline. No retry, timeout exemption or baseline addition was
+  introduced; the strict full offline gate is not green in this environment.
 
 The sweep writes **every file's result** to `build/upstream-report.json`, not
 just failures. New rejections (including diagnostic fixtures) and formerly
@@ -163,6 +168,22 @@ The grammar follows the implementation, including:
 Indentation queries suggest conventional formatting; they do not define the
 language. Native C/JS foreign imports contain **paths**, not embedded source,
 so there is deliberately no fake C/JS injection query.
+
+Assignments and case arms accept recursive patterns, not arbitrary expressions:
+calls with arguments, indexing and lambdas cannot be patterns, including inside
+constructors, lists, tuples and natural successors. Same-line `f (1)` and
+`f [0]` are still postfix expressions, not separate patterns; a comma or newline
+separates them. Empty `()` suffixes preserve eligible patterns, and `0n+name`
+(including leading-zero spellings) preserves name binders, as in the compiler.
+Typed and parallel lets bind names, not destructuring patterns; grouped/reusable
+names and these identity forms remain supported. Erased `-` lets take a direct
+name. Law templates (`for ~...`) must precede ordinary `for`/`exs` clauses.
+
+Constructor resolution/arity, resolved-name eligibility, literal limits, pattern
+counts and computed-match eligibility remain compiler-owned. `npm run test:syntax`
+checks legal controls, the ten affected official malformed files, neighboring
+declarations, and LF/CRLF incremental rejection/repair; set `BEND2_UPSTREAM` to
+the pinned checkout.
 
 For editor consumers, `gpu_call` still spans `!(`, but now contains separate
 anonymous `!` and `(` children. The modifier capture covers only `!`; bracket
