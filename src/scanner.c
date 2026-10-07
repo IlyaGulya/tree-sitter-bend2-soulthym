@@ -11,7 +11,7 @@ enum Token {
   PLUS, MINUS, GT, GE, SHR, MOD, PARALLEL, PARALLEL_START, PARALLEL_VALUE, PARALLEL_END,
   WRITE_START, WRITE_MORE, WRITE_END, IMPORT_START, IMPORT_END, INTEGER, NATURAL, FLOAT, IDENTIFIER,
   DEF_KEYWORD, TYPE_KEYWORD, LAW_KEYWORD, DECLARATION_NAME,
-  STRING_START, STRING_NEWLINE, LT, GLUED_LT, GLUED_COMPARISON_END, ERROR_SENTINEL,
+  STRING_START, STRING_NEWLINE, LT, GLUED_LT, GLUED_COMPARISON_END, ERROR_SENTINEL, GPU_OPEN,
 };
 enum Kind { BODY, MATCH, DO, PAR, LAMBDA, WRITE };
 typedef struct { uint32_t column, first; uint8_t kind; } Frame;
@@ -90,6 +90,15 @@ static uint32_t body_column(const Scanner *s) {
     if (s->frames[i-1].kind == BODY || s->frames[i-1].kind == LAMBDA) return s->frames[i-1].column;
   return 0;
 }
+static inline enum Token frame_end_token(uint8_t kind) {
+  switch (kind) {
+    case MATCH: return MATCH_END;
+    case DO:    return DO_END;
+    case PAR:   return PARALLEL_END;
+    case WRITE: return WRITE_END;
+    default:    return BODY_END;
+  }
+}
 void *tree_sitter_bend2_external_scanner_create(void) { return calloc(1, sizeof(Scanner)); }
 void tree_sitter_bend2_external_scanner_destroy(void *p) { free(p); }
 unsigned tree_sitter_bend2_external_scanner_serialize(void *p, char *b) {
@@ -167,9 +176,33 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
   if (head(l->lookahead) && (v[DEF_KEYWORD] || v[TYPE_KEYWORD] || v[LAW_KEYWORD] || v[DECLARATION_NAME])) {
     char word[32];
     bool valid_name = read_name(l, word, sizeof(word));
+    if (v[ERROR_SENTINEL] && newline && !strcmp(word, "case") && top && top->kind != PAR) {
+      // A same-column sibling arm is a boundary for the damaged arm, not for
+      // its owning match. Close only existing scopes above that match.
+      for (unsigned i = s->size; i > 0; --i) {
+        Frame *owner = &s->frames[i - 1];
+        if (owner->kind != MATCH || owner->first != col) continue;
+        if (top != owner) {
+          enum Token end = frame_end_token(top->kind);
+          if (v[end]) {
+            --s->size; l->result_symbol = end; return true;
+          }
+        }
+        break;
+      }
+    }
     enum Token t = !strcmp(word, "def") ? DEF_KEYWORD : !strcmp(word, "type") ? TYPE_KEYWORD :
       !strcmp(word, "law") ? LAW_KEYWORD : ERROR_SENTINEL;
     if (t != ERROR_SENTINEL && v[t]) {
+      // During recovery, close real scopes before restarting at a root header.
+      // Clearing the frames immediately can strand the parser inside the old
+      // body and make it skip this header and every following declaration.
+      if (v[ERROR_SENTINEL] && newline && col == 0 && top && top->kind != PAR) {
+        enum Token end = frame_end_token(top->kind);
+        if (v[end]) {
+          --s->size; l->result_symbol = end; return true;
+        }
+      }
       s->size = 0;
       s->declaration_name = true;
       l->mark_end(l); l->result_symbol = t; return true;
@@ -191,8 +224,7 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     // Only actual, bounded scope closures are safe to synthesize at EOF. Never
     // push speculative frames while Tree-sitter is trying all recovery tokens.
     if (!top || !l->eof(l)) return false;
-    enum Token t = top->kind == MATCH ? MATCH_END : top->kind == DO ? DO_END :
-      top->kind == PAR ? PARALLEL_END : top->kind == WRITE ? WRITE_END : BODY_END;
+    enum Token t = frame_end_token(top->kind);
     --s->size; l->result_symbol = t; return true;
   }
   if (v[IMPORT_END]) {
@@ -209,6 +241,11 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     }
     if (!space(l->lookahead)) return false;
     l->result_symbol = IMPORT_START; return true;
+  }
+  // Keep the immediate GPU opener out of the regular '(' lexer rules:
+  // sharing them changes recovery of malformed declaration headers.
+  if (v[GPU_OPEN] && !spaced && l->lookahead == '(') {
+    advance(l); l->mark_end(l); l->result_symbol = GPU_OPEN; return true;
   }
   if (!newline && ((v[CALL_OPEN] && l->lookahead == '(') || (v[INDEX_OPEN] && l->lookahead == '['))) {
     l->result_symbol = l->lookahead == '(' ? CALL_OPEN : INDEX_OPEN;

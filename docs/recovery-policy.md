@@ -63,8 +63,12 @@ claimed language or count such an exception as a successful error-detection test
 - An unfinished string should not unnecessarily consume the rest of the file,
   but valid Bend multiline strings must remain valid. A later quote can be a
   genuine closer; do not reinterpret valid text just because it resembles code.
-- Damaged match arms are a known coarse-recovery area. Consistency/repair tests
-  there do not establish preservation of the following arms' highlighting.
+- Missing call/constructor closers in a match arm must retain same-column
+  sibling `case_clause` nodes, fields and editor captures, with native errors
+  confined away from the intact arms. Nested matches must keep the correct
+  inner/outer owner; case-looking text inside valid strings is not a boundary.
+  Other damaged-arm forms remain coarse: consistency/repair tests alone do not
+  establish preservation of the following arms' highlighting.
 
 ## Honest reporting
 

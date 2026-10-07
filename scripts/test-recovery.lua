@@ -38,6 +38,11 @@ for _, gap in ipairs({
   local tail = '?(x: U32) -> U32:\n  g(7)'
   cases[#cases + 1] = { 'unsafe suffix after ' .. gap[1],
     'def broken' .. gap[2] .. tail, 'def broken' .. tail, false, true }
+  local header = 'def broken(x: U32) -> U32:\n  g!'
+  -- Baseline recovery leaves the invalid GPU prefix before the body field.
+  -- Keep header/body highlights without pinning the damaged GPU-call tree.
+  cases[#cases + 1] = { 'GPU opener after ' .. gap[1],
+    header .. gap[2] .. '(7)', header .. '(7)', false, 'body_prefix' }
 end
 for _, op in ipairs({ '&', '|', '->' }) do
   local term = 'A ' .. op .. ' B'
@@ -48,6 +53,20 @@ for _, op in ipairs({ '&', '|', '->' }) do
     'def broken(x: U32) -> U32:\n  F<' .. term,
     'def broken(x: U32) -> U32:\n  F<(' .. term .. ')>', false, 'body' }
 end
+-- An invalid do body must not swallow the next complete declaration header.
+-- This is recovery coverage, not support for match/ordinary lets inside do.
+local invalid_do = 'def broken(x: Bool) -> IO(Bool):\n  do IO<Bool>:\n'
+  .. '    y = x\n    match x:\n      case False{}: return x\n'
+  .. '      case True{}:\n        r : Bool <- work(x)\n        return r'
+local valid_do = 'def broken(x: Bool) -> IO(Bool):\n  do IO<Bool>:\n    return x'
+local definition_first = '\ndef after(x: U32) -> U32: g(42)\n'
+  .. 'type Recovered is Data: Recovered{}\nlaw recovered_law: U32\n'
+for _, crlf in ipairs({ false, true }) do
+  cases[#cases + 1] = {
+    'invalid nested do body ' .. (crlf and 'CRLF' or 'LF'),
+    invalid_do, valid_do, suffix = definition_first, crlf = crlf,
+  }
+end
 local structure_queries = {}
 for file, capture in pairs({ folds = 'fold', tags = 'definition.function', context = 'context',
   textobjects = 'function.outer', locals = 'local.scope', indents = 'indent.begin' }) do
@@ -55,21 +74,42 @@ for file, capture in pairs({ folds = 'fold', tags = 'definition.function', conte
     table.concat(vim.fn.readfile('queries/' .. file .. '.scm'), '\n')) }
 end
 local locality_count = #cases
--- Known limits: later arms in the SAME damaged match can still be swallowed.
--- Exercise repair/incremental consistency without enshrining today's error
--- tree or requiring highlighting to stay broken after a future improvement.
+-- Missing call/constructor closers must retain sibling arms and editor
+-- captures. Other damaged-arm forms still promise only consistency/repair;
+-- do not enshrine their current error trees.
 for _, arm in ipairs({
   { 'missing let value', 'y =', 'y = 1; y' },
   { 'missing parenthesis', '(1 + 2', '(1 + 2)' },
-  { 'missing call closer', 'g(1, 2', 'g(1, 2)' },
+  { 'missing call closer', 'g(1, 2', 'g(1, 2)', retain_siblings = true },
   { 'invalid character', '$', '1' },
-  { 'missing constructor closer', 'C{1', 'C{1}' },
+  { 'missing constructor closer', 'C{1', 'C{1}', retain_siblings = true },
   { 'missing quote', '"unfinished', '"unfinished"' },
   { 'missing body', '', '1' },
 }) do
   local start = 'def broken(x: T) -> U32:\n  match x:\n    case A{}:\n      '
   local finish = '\n    case B{}: 42\n    case C{}: 43'
-  cases[#cases + 1] = { 'match arm: ' .. arm[1], start .. arm[2] .. finish, start .. arm[3] .. finish, true }
+  local retain = arm.retain_siblings
+  for _, crlf in ipairs(retain and { false, true } or { false }) do
+    cases[#cases + 1] = {
+      'match arm: ' .. arm[1] .. (crlf and ' CRLF' or ' LF'),
+      start .. arm[2] .. finish, start .. arm[3] .. finish, true, crlf = crlf,
+      following_cases = retain and { ['B{}'] = '42', ['C{}'] = '43' } or nil,
+    }
+  end
+end
+for _, inner_sibling in ipairs({ false, true }) do
+  for _, crlf in ipairs({ false, true }) do
+    local start = 'def broken(x: T) -> U32:\n  match x:\n    case A{}:\n'
+      .. '      match x:\n        case InnerA{}:\n          g(1, 2'
+    local finish = (inner_sibling and '\n        case InnerB{}: 44' or '')
+      .. '\n    case B{}: 42\n    case C{}: 43'
+    local retained = { ['B{}'] = '42', ['C{}'] = '43' }
+    if inner_sibling then retained['InnerB{}'] = '44' end
+    cases[#cases + 1] = {
+      (inner_sibling and 'inner' or 'outer') .. ' match boundary ' .. (crlf and 'CRLF' or 'LF'),
+      start .. finish, start .. ')' .. finish, true, crlf = crlf, following_cases = retained,
+    }
+  end
 end
 local prefix = 'def before() -> U32: 1\n'
 local suffix = '\n' .. [[
@@ -127,10 +167,11 @@ local function check_edited_function(node, text, label, damaged_field)
   assert(def:has_error(), label .. ': error detached from the edited function')
   for _, field in ipairs({ 'name', 'parameters', 'return_type', 'body' }) do
     local part = def:field(field)[1]
-    local affected = (damaged_field == 'parameter' and field == 'parameters') or (damaged_field == 'body' and field == 'body')
+    local affected = (damaged_field == 'parameter' and field == 'parameters')
+      or ((damaged_field == 'body' or damaged_field == 'body_prefix') and field == 'body')
     assert(part and (affected or not part:has_error()), label .. ': damaged intact field ' .. field)
   end
-  if damaged_field ~= 'body' then
+  if damaged_field ~= 'body' and damaged_field ~= 'body_prefix' then
     assert(vim.treesitter.get_node_text(def:field('body')[1], text) == 'g(7)', label .. ': changed function body')
   end
   local captures = {}
@@ -138,7 +179,11 @@ local function check_edited_function(node, text, label, damaged_field)
     captures[highlights.captures[id] .. ':' .. vim.treesitter.get_node_text(capture, text)] = true
   end
   local wanted = { 'function:broken', 'variable.parameter:x' }
-  if damaged_field ~= 'body' then vim.list_extend(wanted, { 'function.call:g', 'number:7' }) end
+  if damaged_field == 'body_prefix' then
+    wanted[#wanted + 1] = 'number:7'
+  elseif damaged_field ~= 'body' then
+    vim.list_extend(wanted, { 'function.call:g', 'number:7' })
+  end
   for _, capture in ipairs(wanted) do
     assert(captures[capture], label .. ': lost edited-function highlight ' .. capture)
   end
@@ -148,6 +193,9 @@ local function check_edited_function(node, text, label, damaged_field)
     local affected = def:field(damaged_field == 'parameter' and 'parameters' or 'body')[1]
     _, _, start_byte = affected:start()
     _, _, end_byte = affected:end_()
+  elseif damaged_field == 'body_prefix' then
+    _, _, start_byte = def:field('return_type')[1]:end_()
+    _, _, end_byte = def:end_()
   end
   local function check_errors(n)
     if n:type() == 'ERROR' or n:missing() then
@@ -164,6 +212,53 @@ local function check_edited_function(node, text, label, damaged_field)
       found = found or (spec.query.captures[id] == spec.capture and capture:id() == def:id())
     end
     assert(found, label .. ': lost ' .. file .. ' capture for edited function')
+  end
+end
+local function check_following_cases(node, text, label, expected)
+  local arms = {}
+  local function collect(n)
+    if n:type() == 'case_clause' then
+      local pattern = n:field('pattern')[1]
+      if pattern then arms[vim.treesitter.get_node_text(pattern, text)] = n end
+    end
+    for child in n:iter_children() do collect(child) end
+  end
+  collect(node)
+  for pattern, value in pairs(expected) do
+    local arm = arms[pattern]
+    assert(arm and not arm:has_error(), label .. ': lost intact following arm ' .. pattern)
+    local body = arm:field('body')[1]
+    assert(body and vim.treesitter.get_node_text(body, text) == value,
+      label .. ': changed following arm body ' .. pattern)
+    local got = {}
+    for id, capture in highlights:iter_captures(arm, text, 0, -1) do
+      got[highlights.captures[id] .. ':' .. vim.treesitter.get_node_text(capture, text)] = true
+    end
+    for _, wanted in ipairs({ 'keyword.conditional:case', 'constructor:' .. pattern:sub(1, -3), 'number:' .. value }) do
+      assert(got[wanted], label .. ': lost following-arm highlight ' .. wanted)
+    end
+    local _, _, arm_start = arm:start()
+    local _, _, arm_end = arm:end_()
+    local function check_errors(n)
+      if n:type() == 'ERROR' or n:missing() then
+        local _, _, first = n:start()
+        local _, _, last = n:end_()
+        assert(last <= arm_start or first >= arm_end, label .. ': error overlaps intact arm ' .. pattern)
+      end
+      for child in n:iter_children() do check_errors(child) end
+    end
+    check_errors(node)
+    for file, capture_name in pairs({
+      folds = 'fold', context = 'context', textobjects = 'conditional.outer',
+      locals = 'local.scope', indents = 'indent.begin',
+    }) do
+      local query = structure_queries[file].query
+      local found = false
+      for id, capture in query:iter_captures(arm, text, 0, -1) do
+        found = found or (query.captures[id] == capture_name and capture:id() == arm:id())
+      end
+      assert(found, label .. ': lost ' .. file .. ' capture for ' .. pattern)
+    end
   end
 end
 local function position(text, offset)
@@ -199,15 +294,39 @@ for _, literal in ipairs({
   end
   assert(count == 1, 'expected exactly one complete multiline string')
 end
+-- A valid multiline string can contain a same-column case-looking line.
+-- It must not trigger damaged-arm recovery or create a phantom sibling.
+for _, crlf in ipairs({ false, true }) do
+  local text = 'def quoted(x: T) -> String:\n  match x:\n    case A{}:\n'
+    .. '      "first\n    case NotAnArm{}: 99\nlast"\n    case B{}: "other"\n'
+  if crlf then text = text:gsub('\n', '\r\n') end
+  local tree = parse(text)
+  assert(not tree:has_error(), 'case-looking multiline string rejected')
+  local query = vim.treesitter.query.parse('bend2', '(case_clause pattern: (_) @pattern)')
+  local patterns = {}
+  for _, capture in query:iter_captures(tree, text, 0, -1) do
+    patterns[#patterns + 1] = vim.treesitter.get_node_text(capture, text)
+  end
+  assert(vim.deep_equal(patterns, { 'A{}', 'B{}' }), 'string contents became match arms')
+end
 local failed = {}
+local retained_arm_count = 0
 for _, case in ipairs(cases) do
   local ok, err = pcall(function()
-    local broken, fixed = prefix .. case[2] .. suffix, prefix .. case[3] .. suffix
+    local tail = case.suffix or suffix
+    local broken, fixed = prefix .. case[2] .. tail, prefix .. case[3] .. tail
+    if case.crlf then
+      broken, fixed = broken:gsub('\n', '\r\n'), fixed:gsub('\n', '\r\n')
+    end
     local expected = parse(fixed)
     assert(not expected:has_error(), case[1] .. ': invalid control fixture')
     local function check_damaged(node, label)
       if case[4] then
         assert(node:has_error(), label .. ': broken match must remain an error')
+        if case.following_cases then
+          check_neighbors(node, broken, label)
+          check_following_cases(node, broken, label, case.following_cases)
+        end
       else
         check_neighbors(node, broken, label)
         if case[5] then check_edited_function(node, broken, label, case[5]) end
@@ -229,11 +348,15 @@ for _, case in ipairs(cases) do
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
   if ok then
-    print('PASS ' .. case[1] .. (case[4] and ' (consistency/repair only)' or ''))
+    if case.following_cases then retained_arm_count = retained_arm_count + 1 end
+    local scope = case.following_cases and ' (sibling-arm locality/captures)'
+      or (case[4] and ' (consistency/repair only)' or '')
+    print('PASS ' .. case[1] .. scope)
   else
     failed[#failed + 1] = tostring(err); print('FAIL ' .. tostring(err))
   end
 end
 assert(#failed == 0, table.concat(failed, '\n'))
-print(('Recovery: %d locality/highlight scenarios; %d additional match repair/consistency scenarios.'):format(locality_count, #cases - locality_count))
+print(('Recovery: %d declaration locality/highlight scenarios; %d sibling-arm locality/capture scenarios; %d match repair/consistency-only scenarios.'):format(
+  locality_count, retained_arm_count, #cases - locality_count - retained_arm_count))
 vim.cmd('qa!')

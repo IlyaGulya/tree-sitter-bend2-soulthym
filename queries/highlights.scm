@@ -20,6 +20,7 @@
 (type_definition name: (identifier) @type.definition)
 (constructor_definition name: (identifier) @constructor)
 (constructor_expression name: (identifier) @constructor)
+(eliminator_arm name: (identifier) @constructor)
 (type_application name: (identifier) @type)
 (call_expression function: (identifier) @function.call)
 (do_expression monad: (identifier) @type)
@@ -35,7 +36,8 @@
 (import_path) @string.special.path
 (foreign_import path: (string) @string.special.path)
 (decorator) @attribute
-(gpu_call) @keyword.modifier
+(function_definition "?" @attribute)
+(gpu_call "!" @keyword.modifier)
 
 ["def" "type" "law" "is" "where" "for" "exs" "do"] @keyword
 ["match" "case"] @keyword.conditional
@@ -44,6 +46,6 @@
 "Base" @module
 ["(" ")" "[" "]" "{" "}"] @punctuation.bracket
 ["," ";" ":"] @punctuation.delimiter
-["->" "=>" "<-" "=" "==" "!=" "@" "\\" "?" "~"
+["->" "=>" "<-" "=" "==" "!=" "@" "\\" "~"
  "+" "-" "*" "/" "%" "<" ">" "<=" ">=" "<<" ">>"
  "&" "|" "&&" "||" "<>" "++" "<&>" ".&." ".|." ".^." "^"] @operator

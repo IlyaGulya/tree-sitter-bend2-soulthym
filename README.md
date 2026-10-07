@@ -65,12 +65,18 @@ On the pinned checkout:
   literals, proofs, do notation, templates, parallel lets, arrays and rejection.
 - All seven queries compile in Neovim **0.12.1**; captures, folds, conventional
   indentation and **180 deterministic incremental edits** are checked.
-- **35 recovery scenarios** additionally check error locality and retained
-  highlight captures; **7 damaged-match scenarios** check consistency and repair
-  only. Each scenario is broken and repaired twice using minimal buffer edits,
-  comparing complete node types/ranges against fresh parses. Suffix/type-argument
-  cases also check the edited function's fields and captures from all seven
-  query groups (including folds, tags, context, textobjects, locals and indents).
+- **42 declaration-recovery scenarios** check error locality and retained
+  highlight captures; **8 sibling-arm scenarios** also preserve intact
+  `case_clause` fields and highlight/fold/context/textobject/local/indent captures
+  after missing call/constructor closers, including nested match boundaries.
+  **5 other damaged-match scenarios** check consistency and repair only.
+  Scenarios are broken and repaired twice using minimal buffer edits, comparing
+  complete node types/ranges against fresh parses. LF/CRLF and valid multiline
+  strings containing case-looking text are checked. Suffix/type-argument cases
+  check edited-function fields and captures from all seven query groups.
+  Invalid nested `do` bodies additionally check following definition/type/law
+  recovery with LF and CRLF. This does not make ordinary lets or `match` inside
+  `do` valid Bend, or guarantee preservation of the damaged function itself.
 - **53 upgrade checks** cover syntax boundaries, valid lookalikes, deep nesting
   and incremental edits. Standalone C tests exercise scanner serialization,
   full-width columns, all frame kinds, capacity and truncated states.
@@ -152,6 +158,12 @@ Indentation queries suggest conventional formatting; they do not define the
 language. Native C/JS foreign imports contain **paths**, not embedded source,
 so there is deliberately no fake C/JS injection query.
 
+For editor consumers, `gpu_call` still spans `!(`, but now contains separate
+anonymous `!` and `(` children. The modifier capture covers only `!`; bracket
+queries can capture `(` and the enclosing `arguments` node's closing `)`.
+Consumers matching the former combined anonymous `!(` token must update their
+queries. The named node and Tree-sitter ABI 15 are unchanged.
+
 ### Recovery while editing
 
 **Policy: preserve useful editor structure through mistakes and report localized
@@ -175,9 +187,11 @@ therefore still extend an accidentally opened string. Multiline content is
 represented by separate `string_content` nodes around physical newlines.
 
 These are tested scenarios, not a guarantee for arbitrary broken programs.
-Recovery **inside a damaged match** remains coarse: later case arms can be
+After a missing call/constructor closer, same-column sibling arms retain their
+`case_clause` nodes and editor captures; nested match boundaries are tested too.
+Recovery **inside other damaged matches** remains coarse: later case arms can be
 absorbed into an error region, and complicated combinations can also affect
-following declarations. The seven match probes verify repair and incremental
+following declarations. Five such probes verify repair and incremental
 consistency, not highlight preservation for those arms. Fixing the original
 syntax error restores the complete tree.
 

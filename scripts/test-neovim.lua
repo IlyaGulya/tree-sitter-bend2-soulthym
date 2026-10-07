@@ -53,22 +53,44 @@ set_text(source)
 vim.bo[buf].filetype = 'bend'
 local parser = vim.treesitter.get_parser(buf, 'bend2')
 vim.treesitter.start(buf, 'bend2')
-local tree = parser:parse()[1]
-local captures = {}
+parser:parse()
 local query = vim.treesitter.query.get('bend2', 'highlights')
-for id in query:iter_captures(tree:root(), buf, 0, -1) do captures[query.captures[id]] = true end
-for _, cap in ipairs({ 'function', 'constructor', 'keyword.conditional', 'string', 'variable.parameter' }) do
-  assert(captures[cap], 'missing highlight: ' .. cap)
-end
-for _, name in ipairs({ 'folds', 'textobjects', 'locals', 'tags', 'context' }) do
-  local count = 0
-  for _ in vim.treesitter.query.get('bend2', name):iter_captures(tree:root(), buf, 0, -1) do count = count + 1 end
-  assert(count > 0, 'empty query: ' .. name)
-end
 vim.wo.foldmethod = 'expr'
 vim.wo.foldexpr = 'v:lua.vim.treesitter.foldexpr()'
 vim.cmd('normal! zx')
 assert(vim.fn.foldlevel(2) > 0, 'missing declaration fold')
+
+-- Role captures must cover the intended token, not neighboring delimiters.
+local role_source = [[
+@unsafe
+def work?(x: U32) -> T: g!(x)
+def elim() -> T: \{A: x => x; B: y => y; fallback}
+def hole() -> T: ?TODO
+]]
+local role_tree = parse(role_source)
+assert(not role_tree:has_error(), 'invalid highlight role fixture')
+local expected_roles = {
+  ['attribute:?'] = false, ['keyword.modifier:!'] = false,
+  ['punctuation.bracket:('] = false, ['constructor:A'] = false,
+  ['constructor:B'] = false, ['variable.builtin:?TODO'] = false,
+  ['function:work'] = false, ['function.call:g'] = false,
+  ['variable.parameter:x'] = false,
+}
+for id, node in query:iter_captures(role_tree, role_source, 0, -1) do
+  local key = query.captures[id] .. ':' .. vim.treesitter.get_node_text(node, role_source)
+  if expected_roles[key] ~= nil then expected_roles[key] = true end
+  assert(key ~= 'operator:?', 'unsafe/hole marker incorrectly overrides its semantic role')
+  assert(key ~= 'keyword.modifier:!(', 'GPU modifier includes its opening bracket')
+end
+for role, found in pairs(expected_roles) do assert(found, 'missing token role: ' .. role) end
+local brackets = vim.treesitter.query.parse('bend2',
+  '(arguments (gpu_call "(" @open) ")" @close) @pair')
+local gpu_pair = {}
+for id, node in brackets:iter_captures(role_tree, role_source, 0, -1) do
+  gpu_pair[brackets.captures[id]] = vim.treesitter.get_node_text(node, role_source)
+end
+assert(gpu_pair.open == '(' and gpu_pair.close == ')' and gpu_pair.pair == '!(x)',
+  'GPU argument parentheses are not available to bracket queries')
 
 -- Check trees after real buffer edits against independent full parses. Include
 -- unfinished strings, altered columns, deleted delimiters, comments and EOF.
