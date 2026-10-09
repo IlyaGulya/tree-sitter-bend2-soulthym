@@ -67,25 +67,12 @@ for _, crlf in ipairs({ false, true }) do
     invalid_do, valid_do, suffix = definition_first, crlf = crlf,
   }
 end
--- A decorated definition can be the very first intact recovery neighbor.
-for _, crlf in ipairs({ false, true }) do
-  for _, scenario in ipairs({
-    { 'invalid do before immediate decorated def', invalid_do, valid_do, '\n@unsafe' .. definition_first },
-    { 'stray inline decorator', 'def broken() -> U32: 1 @unsafe garbage', 'def broken() -> U32: 1' },
-    { 'decorator on type', invalid_do .. '\n@unsafe type Extra is Data: Extra{}', valid_do .. '\ntype Extra is Data: Extra{}' },
-    { 'decorator on law', invalid_do .. '\n@unsafe law extra: U32', valid_do .. '\nlaw extra: U32' },
-  }) do
-    cases[#cases + 1] = { scenario[1] .. (crlf and ' CRLF' or ' LF'), scenario[2], scenario[3],
-      suffix = scenario[4], crlf = crlf }
-  end
-end
 local structure_queries = {}
 for file, capture in pairs({ folds = 'fold', tags = 'definition.function', context = 'context',
   textobjects = 'function.outer', locals = 'local.scope', indents = 'indent.begin' }) do
   structure_queries[file] = { capture = capture, query = vim.treesitter.query.parse('bend2',
     table.concat(vim.fn.readfile('queries/' .. file .. '.scm'), '\n')) }
 end
-local locality_count = #cases
 -- Missing call/constructor closers must retain sibling arms and editor
 -- captures. Other damaged-arm forms still promise only consistency/repair;
 -- do not enshrine their current error trees.
@@ -109,6 +96,7 @@ for _, arm in ipairs({
     }
   end
 end
+local match_owner_columns = { ['B{}'] = 2, ['C{}'] = 2, ['InnerB{}'] = 6 }
 for _, inner_sibling in ipairs({ false, true }) do
   for _, crlf in ipairs({ false, true }) do
     local start = 'def broken(x: T) -> U32:\n  match x:\n    case A{}:\n'
@@ -119,9 +107,107 @@ for _, inner_sibling in ipairs({ false, true }) do
     if inner_sibling then retained['InnerB{}'] = '44' end
     cases[#cases + 1] = {
       (inner_sibling and 'inner' or 'outer') .. ' match boundary ' .. (crlf and 'CRLF' or 'LF'),
-      start .. finish, start .. ')' .. finish, true, crlf = crlf, following_cases = retained,
+      start .. finish, start .. ')' .. finish, true, crlf = crlf,
+      following_cases = retained, arm_owner_column = match_owner_columns,
     }
   end
+end
+-- PR #1 review regressions: each has a clean control and exercises both
+-- newline encodings through the same twice-repeated minimal buffer edit below.
+local function review_case(name, broken, fixed, options)
+  for _, crlf in ipairs({ false, true }) do
+    local case = { 'review ' .. name .. (crlf and ' CRLF' or ' LF'), broken, fixed, crlf = crlf }
+    for key, value in pairs(options or {}) do case[key] = value end
+    cases[#cases + 1] = case
+  end
+end
+local match_start = 'def broken(x: T) -> U32:\n  match x:\n    case '
+local match_finish = '\n    case B{}: 42\n    case C{}: 43'
+local siblings = { ['B{}'] = '42', ['C{}'] = '43' }
+review_case('1 invalid case pattern before immediate def',
+  match_start .. '{}: g(x)' .. match_finish,
+  match_start .. 'A{}: g(x)' .. match_finish,
+  { suffix = definition_first })
+review_case('1 missing case colon',
+  match_start .. 'A{} g(1, 2)' .. match_finish,
+  match_start .. 'A{}: g(1, 2)' .. match_finish,
+  { suffix = definition_first, following_cases = { ['C{}'] = '43' } })
+review_case('2 unfinished GPU prefix before immediate def',
+  'def broken() -> U32: g!', 'def broken() -> U32: g!(1)',
+  { suffix = definition_first })
+review_case('3 missing function name with GPU body',
+  'def (x: T) -> T: g!(x)', 'def broken(x: T) -> T: g!(x)',
+  { suffix = definition_first })
+review_case('3 missing function name after header comment',
+  'def # header\n(x: T) -> T: g!(x)', 'def # header\nbroken(x: T) -> T: g!(x)',
+  { suffix = definition_first })
+review_case('5 invalid do before immediate decorated def', invalid_do, valid_do,
+  { suffix = '\n@unsafe' .. definition_first })
+for _, damage in ipairs({
+  { '4 mistyped GPU opener', 'g!)1)', 'g!(1)' },
+  { '6 missing let-value call closer', 'y = g(1\n      y', 'y = g(1)\n      y' },
+}) do
+  review_case(damage[1] .. ' with siblings',
+    match_start .. 'A{}:\n      ' .. damage[2] .. match_finish,
+    match_start .. 'A{}:\n      ' .. damage[3] .. match_finish,
+    { following_cases = siblings })
+  for _, inner_sibling in ipairs({ false, true }) do
+    local start = match_start .. 'A{}:\n      match x:\n        case InnerA{}:\n          '
+    local finish = (inner_sibling and '\n        case InnerB{}: 44' or '') .. match_finish
+    local retained = { ['B{}'] = '42', ['C{}'] = '43' }
+    if inner_sibling then retained['InnerB{}'] = '44' end
+    review_case(damage[1] .. (inner_sibling and ' nested inner sibling' or ' nested outer boundary'),
+      start .. damage[2]:gsub('\n      ', '\n          ') .. finish,
+      start .. damage[3]:gsub('\n      ', '\n          ') .. finish,
+      { following_cases = retained, arm_owner_column = match_owner_columns })
+  end
+end
+for _, outer in ipairs({
+  { 'grouping unfinished GPU', '(g!)', '(g)', 'parenthesized_expression' },
+  { 'outer call unfinished GPU', 'wrap(g!)', 'wrap(g)', 'call_expression' },
+  { 'outer call missing GPU opener', 'wrap(g!1)', 'wrap(g!(1))', 'call_expression' },
+  { 'outer call missing closer after real inner GPU opener', 'wrap(g!(1)', 'wrap(g!(1))', 'call_expression', true },
+}) do
+  -- A real inner '!(' legitimately owns the first ')'. If one closer is
+  -- absent, preserve normal nesting and report the missing outer closer;
+  -- do not guess that the author meant this token for the outer expression.
+  review_case('4 delimiter ownership ' .. outer[1],
+    'def broken() -> T: ' .. outer[2], 'def broken() -> T: ' .. outer[3],
+    { delimiter = { kind = outer[4], broken = outer[2], fixed = outer[3], inner_closer = outer[5] } })
+  local start = match_start .. 'A{}:\n      match x:\n        case InnerA{}:\n          '
+  local finish = '\n        case InnerB{}: 44' .. match_finish
+  review_case('4 nested delimiter ownership ' .. outer[1], start .. outer[2] .. finish, start .. outer[3] .. finish,
+    { following_cases = { ['InnerB{}'] = '44', ['B{}'] = '42', ['C{}'] = '43' },
+      arm_owner_column = match_owner_columns,
+      delimiter = { kind = outer[4], broken = outer[2], fixed = outer[3], inner_closer = outer[5] } })
+end
+-- Nearby damage found by differential probes must not regress shared guards.
+local nested_match = '\n  match x:\n    case A{}:\n      match x:\n'
+  .. '        case InnerA{}: g(1, 2)\n        case '
+review_case('guard nested malformed header retains outer owner',
+  'def broken(x: T) -> U32:' .. nested_match .. '{}: 44' .. match_finish,
+  'def broken(x: T) -> U32:' .. nested_match .. 'InnerB{}: 44' .. match_finish,
+  { following_cases = siblings, arm_owner_column = 2 })
+review_case('guard damaged name prefix retains arms',
+  match_start:gsub('^def ', 'def) ') .. 'A{}: C{1, 2}' .. match_finish,
+  match_start .. 'A{}: C{1, 2}' .. match_finish,
+  { following_cases = siblings, arm_owner_column = 2 })
+review_case('guard inline declaration typo is not a restart',
+  'law broken:\n  for x: T\n  match x:\n    case A{}: g!def (1, 2)' .. match_finish,
+  'law broken:\n  for x: T\n  match x:\n    case A{}: g!(1, 2)' .. match_finish,
+  { following_cases = siblings, arm_owner_column = 2 })
+local anonymous_header = 'broken(x: T) -> U32:' .. nested_match .. 'InnerB{}: 44' .. match_finish
+review_case('guard missing declaration keyword', anonymous_header, 'def ' .. anonymous_header)
+review_case('guard stray inline decorator',
+  'def broken() -> U32: 1 @unsafe garbage', 'def broken() -> U32: 1')
+local annotation_body = 'def broken(x: T) -> U32:\n  a b = g!(x) g(x)\n  +m = h(a, b)\n  (m + 1 * 2'
+review_case('guard unfinished GPU before annotation', annotation_body .. '! : U32)', annotation_body .. ' : U32)')
+local typed_do = 'def broken(x: T) -> IO(U32):\n  do IO<U32>:\n    x'
+review_case('guard real GPU prefix during do recovery',
+  typed_do .. ' U32 <- g!(1)\n    return x', typed_do .. ': U32 <- g!(1)\n    return x')
+for _, declaration in ipairs({ 'type Extra is Data: Extra{}', 'law extra: U32' }) do
+  review_case('guard decorator on wrong declaration ' .. declaration,
+    invalid_do .. '\n@unsafe ' .. declaration, valid_do .. '\n' .. declaration)
 end
 local prefix = 'def before() -> U32: 1\n'
 local suffix = '\n' .. [[
@@ -318,7 +404,7 @@ local function check_edited_function(node, text, label, damaged_field)
     assert(found, label .. ': lost ' .. file .. ' capture for edited function')
   end
 end
-local function check_following_cases(node, text, label, expected)
+local function check_following_cases(node, text, label, expected, owner_column)
   local arms = {}
   local function collect(n)
     if n:type() == 'case_clause' then
@@ -328,12 +414,36 @@ local function check_following_cases(node, text, label, expected)
     for child in n:iter_children() do collect(child) end
   end
   collect(node)
-  for pattern, value in pairs(expected) do
+  local patterns = vim.tbl_keys(expected)
+  table.sort(patterns)
+  for _, pattern in ipairs(patterns) do
+    local value = expected[pattern]
     local arm = arms[pattern]
     assert(arm and not arm:has_error(), label .. ': lost intact following arm ' .. pattern)
+    if owner_column then
+      local owner = arm:parent()
+      while owner and owner:type() ~= 'match_expression' do owner = owner:parent() end
+      local column = type(owner_column) == 'table' and owner_column[pattern] or owner_column
+      assert(owner and select(2, owner:start()) == column,
+        label .. ': arm reassigned to another match')
+    end
     local body = arm:field('body')[1]
     assert(body and vim.treesitter.get_node_text(body, text) == value,
       label .. ': changed following arm body ' .. pattern)
+    local first, last = source_range(text, 'case ' .. pattern .. ': ' .. value)
+    local pattern_start = first + 5
+    local body_start = last - #value + 1
+    check_range(arm, text, first, last, label .. ' following arm ' .. pattern)
+    check_range(arm:field('pattern')[1], text, pattern_start, pattern_start + #pattern - 1,
+      label .. ' following pattern ' .. pattern)
+    check_range(body, text, body_start, last, label .. ' following body ' .. pattern)
+    for _, spec in ipairs({
+      { 'keyword.conditional', first, first + 3 },
+      { 'constructor', pattern_start, pattern_start + #pattern - 3 },
+      { 'number', body_start, last },
+    }) do
+      check_capture(highlights, arm, text, spec[1], spec[2], spec[3], label .. ' following arm highlights')
+    end
     local got = {}
     for id, capture in highlights:iter_captures(arm, text, 0, -1) do
       got[highlights.captures[id] .. ':' .. vim.treesitter.get_node_text(capture, text)] = true
@@ -362,8 +472,88 @@ local function check_following_cases(node, text, label, expected)
         found = found or (query.captures[id] == capture_name and capture:id() == arm:id())
       end
       assert(found, label .. ': lost ' .. file .. ' capture for ' .. pattern)
+      check_capture(query, arm, text, capture_name, first, last, label .. ' following arm ' .. file)
+    end
+    for file, captures in pairs({
+      context = { { 'context.end', body_start, last } },
+      textobjects = { { 'conditional.inner', body_start, last } },
+      locals = { { 'local.reference', pattern_start, pattern_start + #pattern - 3 } },
+      indents = { { 'indent.align', pattern_start, pattern_start + #pattern - 1 } },
+    }) do
+      for _, spec in ipairs(captures) do
+        check_capture(structure_queries[file].query, arm, text, spec[1], spec[2], spec[3], label .. ' following arm ' .. file)
+      end
     end
   end
+end
+local function check_delimiter_owner(node, text, label, kind, expression, inner_closer)
+  local first, last = source_range(text, expression)
+  local owner
+  local function collect(n)
+    local _, _, a = n:start()
+    local _, _, b = n:end_()
+    if n:type() == kind and a == first - 1 and b == last then owner = n end
+    for child in n:iter_children() do collect(child) end
+  end
+  collect(node)
+  assert(owner, label .. ': lost outer ' .. kind .. ' for ' .. expression)
+  check_range(owner, text, first, last, label .. ' delimiter owner')
+  local container, opener = owner, first
+  if kind == 'call_expression' then
+    local head = expression:match('^[%w_]+')
+    check_range(owner:field('function')[1], text, first, first + #head - 1, label .. ' outer callee')
+    container = owner:field('arguments')[1]
+    opener = first + #head + (expression:sub(#head + 1, #head + 1) == '!' and 1 or 0)
+    check_range(container, text, first + #head, last, label .. ' outer arguments')
+  else
+    assert(owner:field('body')[1], label .. ': lost grouped body')
+  end
+  local closing_owner = container
+  if inner_closer then
+    local missing
+    for child in container:iter_children() do
+      if child:type() == ')' and child:missing() then missing = child end
+    end
+    assert(missing, label .. ': missing outer closer was not reported')
+    local inner = container:field('argument')[1]
+    assert(inner and inner:type() == 'call_expression' and not inner:has_error(),
+      label .. ': real inner call lost or damaged')
+    closing_owner = inner:field('arguments')[1]
+  end
+  local closer
+  for child in closing_owner:iter_children() do
+    local _, _, a = child:start()
+    if child:type() == ')' and a == last - 1 then closer = child end
+  end
+  assert(closer and not closer:missing(), label .. ': real closer reassigned or synthesized')
+  check_range(closer, text, last, last, label .. ' real closer')
+  -- A GPU opener may only exist where the source actually contains '!('.
+  -- Do not pin the otherwise uncertain error tree for an unfinished operand.
+  local function real_openers(n)
+    if n:type() == 'gpu_call' then
+      assert(vim.treesitter.get_node_text(n, text) == '!(', label .. ': invented GPU opener')
+      for child in n:iter_children() do
+        assert(not child:missing(), label .. ': synthesized GPU opener')
+      end
+    end
+    for child in n:iter_children() do real_openers(child) end
+  end
+  real_openers(owner)
+  -- Ordinary delimiters belong directly to arguments/grouping; GPU '('
+  -- belongs to gpu_call, while its ')' belongs to arguments.
+  local open_container = container
+  if text:sub(opener - 1, opener - 1) == '!' then
+    for child in container:iter_children() do
+      if child:type() == 'gpu_call' then open_container = child; break end
+    end
+  end
+  local open
+  for child in open_container:iter_children() do
+    local _, _, a = child:start()
+    if child:type() == '(' and a == opener - 1 then open = child end
+  end
+  assert(open and not open:missing(), label .. ': real outer opener lost')
+  check_range(open, text, opener, opener, label .. ' real outer opener')
 end
 local function edit(buf, from, to)
   local first, last = 0, 0
@@ -408,6 +598,28 @@ for _, crlf in ipairs({ false, true }) do
   end
   assert(vim.deep_equal(patterns, { 'A{}', 'B{}' }), 'string contents became match arms')
 end
+-- Valid nesting must not acquire an indentation rule for ')' during recovery
+-- fixes. Check every real closer's owner, not merely that parsing succeeds.
+for _, sample in ipairs({
+  { 'compact nested GPU', 'wrap(g!(wrap(g!(1))))', 'g!(wrap(g!(1)))' },
+  { 'less-indented inner closer', 'wrap(\n      g!(\n        wrap(g!(1))\n )\n          )',
+    'g!(\n        wrap(g!(1))\n )' },
+  { 'more-indented inner closer', 'wrap(\n  g!(\n    wrap(g!(1))\n            )\n)',
+    'g!(\n    wrap(g!(1))\n            )' },
+}) do
+  for _, crlf in ipairs({ false, true }) do
+    local expression, inner = sample[2], sample[3]
+    if crlf then expression, inner = expression:gsub('\n', '\r\n'), inner:gsub('\n', '\r\n') end
+    local text = 'def nested() -> T: ' .. expression .. '\n'
+    local tree = parse(text)
+    local label = 'review 4 valid ' .. sample[1] .. (crlf and ' CRLF' or ' LF')
+    assert(not tree:has_error(), label .. ': invalid control fixture')
+    for _, owned in ipairs({ expression, inner, 'wrap(g!(1))', 'g!(1)' }) do
+      check_delimiter_owner(tree, text, label, 'call_expression', owned)
+    end
+    print('PASS ' .. label)
+  end
+end
 for _, text in ipairs({
   '@ # marker\nunsafe # keyword\ndef f() -> U32: g!(1)\n',
   'def f() -> Type: (@unsafe: U32 -> U32)\n',
@@ -415,7 +627,7 @@ for _, text in ipairs({
   assert(not parse(text):has_error(), 'valid contextual/decorator control rejected')
 end
 local failed = {}
-local retained_arm_count = 0
+local locality_count, retained_arm_count = 0, 0
 for _, case in ipairs(cases) do
   local ok, err = pcall(function()
     local tail = case.suffix or suffix
@@ -425,16 +637,29 @@ for _, case in ipairs(cases) do
     end
     local expected = parse(fixed)
     assert(not expected:has_error(), case[1] .. ': invalid control fixture')
+    if case.delimiter then
+      local expression = case.delimiter.fixed
+      if case.crlf then expression = expression:gsub('\n', '\r\n') end
+      check_delimiter_owner(expected, fixed, case[1] .. ' control', case.delimiter.kind, expression)
+    end
     local function check_damaged(node, label)
       if case[4] then
         assert(node:has_error(), label .. ': broken match must remain an error')
         if case.following_cases then
           check_neighbors(node, broken, label)
-          check_following_cases(node, broken, label, case.following_cases)
+          check_following_cases(node, broken, label, case.following_cases, case.arm_owner_column)
         end
       else
         check_neighbors(node, broken, label)
         if case[5] then check_edited_function(node, broken, label, case[5]) end
+        if case.following_cases then
+          check_following_cases(node, broken, label, case.following_cases, case.arm_owner_column)
+        end
+      end
+      if case.delimiter then
+        local expression = case.delimiter.broken
+        if case.crlf then expression = expression:gsub('\n', '\r\n') end
+        check_delimiter_owner(node, broken, label, case.delimiter.kind, expression, case.delimiter.inner_closer)
       end
     end
     check_damaged(parse(broken), case[1])
@@ -453,7 +678,11 @@ for _, case in ipairs(cases) do
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
   if ok then
-    if case.following_cases then retained_arm_count = retained_arm_count + 1 end
+    if case.following_cases then
+      retained_arm_count = retained_arm_count + 1
+    elseif not case[4] then
+      locality_count = locality_count + 1
+    end
     local scope = case.following_cases and ' (sibling-arm locality/captures)'
       or (case[4] and ' (consistency/repair only)' or '')
     print('PASS ' .. case[1] .. scope)

@@ -66,7 +66,17 @@ claimed language or count such an exception as a successful error-detection test
 - Missing call/constructor closers in a match arm must retain same-column
   sibling `case_clause` nodes, fields and editor captures, with native errors
   confined away from the intact arms. Nested matches must keep the correct
-  inner/outer owner; case-looking text inside valid strings is not a boundary.
+  inner/outer owner; calls in let values need these checks too. Case-looking
+  text inside valid strings is not a boundary.
+- An unfinished GPU modifier must not invent an opener or take a real outer
+  closer. Retain the outer expression and its delimiter ownership through
+  errors. A genuinely opened inner call still follows ordinary nesting; a
+  missing closer can be ambiguous. Do not guess author intent or impose a new
+  indentation-alignment requirement on parentheses.
+- A malformed case header is not a completed arm body. Preserve the following
+  definition and previously retained arms rather than closing a phantom body.
+  An immediately following decorated definition needs the same locality checks
+  as an undecorated one after an invalid `do`.
   Other damaged-arm forms remain coarse: consistency/repair tests alone do not
   establish preservation of the following arms' highlighting.
 

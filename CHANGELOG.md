@@ -2,9 +2,13 @@
 
 ## Unreleased
 
-- Preserve immediately following decorated definitions after invalid `do`
-  bodies. Keep native errors and exact fields/editor capture ranges through
-  LF/CRLF break/repair, including stray or misplaced decorator controls.
+- Restore declaration/arm recovery after malformed case headers, unfinished
+  GPU prefixes and missing function names with GPU bodies. Recognize an
+  immediately following decorated definition after an invalid `do`.
+- Preserve sibling arms after missing call closers in let values, and preserve
+  real delimiter ownership through malformed GPU calls without a new closing-
+  parenthesis indentation rule. Extend LF/CRLF break/repair tests with exact
+  field/capture ranges, all editor query groups and valid nesting controls.
 
 - Preserve following top-level declarations after invalid nested `do` bodies
   by closing bounded scanner scopes before restarting declaration recovery.
