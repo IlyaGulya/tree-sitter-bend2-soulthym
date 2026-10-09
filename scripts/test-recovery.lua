@@ -67,6 +67,18 @@ for _, crlf in ipairs({ false, true }) do
     invalid_do, valid_do, suffix = definition_first, crlf = crlf,
   }
 end
+-- A decorated definition can be the very first intact recovery neighbor.
+for _, crlf in ipairs({ false, true }) do
+  for _, scenario in ipairs({
+    { 'invalid do before immediate decorated def', invalid_do, valid_do, '\n@unsafe' .. definition_first },
+    { 'stray inline decorator', 'def broken() -> U32: 1 @unsafe garbage', 'def broken() -> U32: 1' },
+    { 'decorator on type', invalid_do .. '\n@unsafe type Extra is Data: Extra{}', valid_do .. '\ntype Extra is Data: Extra{}' },
+    { 'decorator on law', invalid_do .. '\n@unsafe law extra: U32', valid_do .. '\nlaw extra: U32' },
+  }) do
+    cases[#cases + 1] = { scenario[1] .. (crlf and ' CRLF' or ' LF'), scenario[2], scenario[3],
+      suffix = scenario[4], crlf = crlf }
+  end
+end
 local structure_queries = {}
 for file, capture in pairs({ folds = 'fold', tags = 'definition.function', context = 'context',
   textobjects = 'function.outer', locals = 'local.scope', indents = 'indent.begin' }) do
@@ -127,6 +139,97 @@ local function signature(node)
   for child in node:iter_children() do result[#result + 1] = signature(child) end
   return result
 end
+local function position(text, offset)
+  local preceding = text:sub(1, offset)
+  local _, row = preceding:gsub('\n', '')
+  return row, #preceding - (preceding:match('.*\n()') or 1) + 1
+end
+-- Source offsets are independent of the recovered tree. Comparing text alone
+-- would miss borrowed fields or captures extending into a damaged neighbor.
+local function check_range(node, text, first, last, label)
+  assert(node, label .. ': missing node')
+  local sr, sc = position(text, first - 1)
+  local er, ec = position(text, last)
+  local _, _, a = node:start()
+  local _, _, b = node:end_()
+  assert(a == first - 1 and b == last and vim.deep_equal({ node:range() }, { sr, sc, er, ec }),
+    label .. ': wrong range for ' .. node:type())
+end
+local function source_range(text, fragment, from)
+  local first, last = text:find(fragment, from or 1, true)
+  assert(first, 'fixture missing source fragment: ' .. fragment)
+  return first, last
+end
+local function check_capture(query, node, text, name, first, last, label)
+  for id, capture in query:iter_captures(node, text, 0, -1) do
+    local _, _, a = capture:start()
+    local _, _, b = capture:end_()
+    if query.captures[id] == name and a == first - 1 and b == last then
+      check_range(capture, text, first, last, label .. ' @' .. name)
+      return
+    end
+  end
+  error(label .. ': lost exact capture @' .. name .. ' at bytes ' .. (first - 1) .. '..' .. last)
+end
+local function check_intact_function(def, text, label)
+  local declaration = 'def after(x: U32) -> U32: g(42)'
+  local first, last = source_range(text, declaration)
+  local header = first
+  local decorator = text:sub(1, first - 1):match('@unsafe\r?\n$')
+  if decorator then first = first - #decorator end
+  assert(def:type() == 'function_definition', label .. ': wrong intact definition type')
+  check_range(def, text, first, last, label .. ' after definition')
+  local parts = {}
+  for _, spec in ipairs({
+    { 'name', 'after' }, { 'parameters', '(x: U32)' },
+    { 'return_type', 'U32', header + #('def after(x: U32) -> ') }, { 'body', 'g(42)' },
+  }) do
+    local a, b = source_range(text, spec[2], spec[3] or header)
+    local field = def:field(spec[1])
+    assert(#field == 1 and not field[1]:has_error(), label .. ': damaged after field ' .. spec[1])
+    check_range(field[1], text, a, b, label .. ' after field ' .. spec[1])
+    parts[spec[1]] = { a, b, field[1] }
+  end
+  local parameter = parts.parameters[3]:named_child(0)
+  local x = header + #('def after(')
+  check_range(parameter, text, x, x + #('x: U32') - 1, label .. ' after parameter')
+  check_range(parameter:field('name')[1], text, x, x, label .. ' after parameter name')
+  check_range(parameter:field('type')[1], text, x + 3, x + 5, label .. ' after parameter type')
+  local body = parts.body[1]
+  for _, spec in ipairs({
+    { 'function', parts.name[1], parts.name[2] }, { 'variable.parameter', x, x },
+    { 'function.call', body, body }, { 'number', body + 2, body + 3 },
+  }) do
+    check_capture(highlights, def, text, spec[1], spec[2], spec[3], label .. ' after highlights')
+  end
+  for file, captures in pairs({
+    folds = { { 'fold', first, last } },
+    tags = { { 'definition.function', first, last }, { 'name', parts.name[1], parts.name[2] },
+      { 'reference.call', body, parts.body[2] }, { 'name', body, body } },
+    context = { { 'context', first, last }, { 'context.end', body, parts.body[2] } },
+    textobjects = { { 'function.outer', first, last }, { 'function.inner', body, parts.body[2] },
+      { 'parameter.outer', x, x + 5 }, { 'parameter.inner', x, x + 5 },
+      { 'call.outer', body, parts.body[2] }, { 'call.inner', body + 2, body + 3 } },
+    locals = { { 'local.scope', first, last }, { 'local.definition', x, x },
+      { 'local.reference', parts.name[1], parts.name[2] }, { 'local.reference', body, body } },
+    indents = { { 'indent.begin', first, last },
+      { 'indent.align', parts.parameters[1], parts.parameters[2] },
+      { 'indent.align', body + 1, parts.body[2] } },
+  }) do
+    for _, spec in ipairs(captures) do
+      check_capture(structure_queries[file].query, def, text, spec[1], spec[2], spec[3], label .. ' after ' .. file)
+    end
+  end
+  local decorations = {}
+  for child in def:iter_children() do
+    if child:type() == 'decorator' then decorations[#decorations + 1] = child end
+  end
+  assert(#decorations == (decorator and 1 or 0), label .. ': changed after decorator')
+  if decorator then
+    check_range(decorations[1], text, first, first + 6, label .. ' after decorator')
+    check_capture(highlights, def, text, 'attribute', first, first + 6, label .. ' after decorator highlight')
+  end
+end
 local function check_neighbors(node, text, label)
   assert(node:has_error(), label .. ': broken input must remain an error')
   local definitions = {}
@@ -156,6 +259,7 @@ local function check_neighbors(node, text, label)
       assert(captures[capture], label .. ': lost highlight ' .. capture .. ' in ' .. name)
     end
   end
+  check_intact_function(definitions.after, text, label)
 end
 local function check_edited_function(node, text, label, damaged_field)
   local def
@@ -261,11 +365,6 @@ local function check_following_cases(node, text, label, expected)
     end
   end
 end
-local function position(text, offset)
-  local preceding = text:sub(1, offset)
-  local _, row = preceding:gsub('\n', '')
-  return row, #preceding - (preceding:match('.*\n()') or 1) + 1
-end
 local function edit(buf, from, to)
   local first, last = 0, 0
   while first < math.min(#from, #to) and from:byte(first + 1) == to:byte(first + 1) do first = first + 1 end
@@ -308,6 +407,12 @@ for _, crlf in ipairs({ false, true }) do
     patterns[#patterns + 1] = vim.treesitter.get_node_text(capture, text)
   end
   assert(vim.deep_equal(patterns, { 'A{}', 'B{}' }), 'string contents became match arms')
+end
+for _, text in ipairs({
+  '@ # marker\nunsafe # keyword\ndef f() -> U32: g!(1)\n',
+  'def f() -> Type: (@unsafe: U32 -> U32)\n',
+}) do
+  assert(not parse(text):has_error(), 'valid contextual/decorator control rejected')
 end
 local failed = {}
 local retained_arm_count = 0

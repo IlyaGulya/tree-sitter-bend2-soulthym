@@ -231,11 +231,21 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_decorator_start"
+          },
+          "named": false,
           "value": "@"
         },
         {
-          "type": "STRING",
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_unsafe_keyword"
+          },
+          "named": false,
           "value": "unsafe"
         }
       ]
@@ -4710,7 +4720,12 @@
                 "type": "SEQ",
                 "members": [
                   {
-                    "type": "STRING",
+                    "type": "ALIAS",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "_at"
+                    },
+                    "named": false,
                     "value": "@"
                   },
                   {
@@ -4906,7 +4921,12 @@
                     }
                   },
                   {
-                    "type": "STRING",
+                    "type": "ALIAS",
+                    "content": {
+                      "type": "SYMBOL",
+                      "name": "_at"
+                    },
+                    "named": false,
                     "value": "@"
                   }
                 ]
@@ -5773,6 +5793,18 @@
     {
       "type": "SYMBOL",
       "name": "_gpu_open"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_decorator_start"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_at"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_unsafe_keyword"
     }
   ],
   "inline": [],

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Preserve immediately following decorated definitions after invalid `do`
+  bodies. Keep native errors and exact fields/editor capture ranges through
+  LF/CRLF break/repair, including stray or misplaced decorator controls.
+
 - Preserve following top-level declarations after invalid nested `do` bodies
   by closing bounded scanner scopes before restarting declaration recovery.
   Add LF/CRLF break/repair regressions; keep native syntax errors and existing

@@ -12,6 +12,7 @@ enum Token {
   WRITE_START, WRITE_MORE, WRITE_END, IMPORT_START, IMPORT_END, INTEGER, NATURAL, FLOAT, IDENTIFIER,
   DEF_KEYWORD, TYPE_KEYWORD, LAW_KEYWORD, DECLARATION_NAME,
   STRING_START, STRING_NEWLINE, LT, GLUED_LT, GLUED_COMPARISON_END, ERROR_SENTINEL, GPU_OPEN,
+  DECORATOR_START, AT, UNSAFE_KEYWORD,
 };
 enum Kind { BODY, MATCH, DO, PAR, LAMBDA, WRITE };
 typedef struct { uint32_t column, first; uint8_t kind; } Frame;
@@ -19,12 +20,19 @@ typedef struct { uint32_t column, first; uint8_t kind; } Frame;
 _Static_assert(MAX_FRAMES <= UINT8_MAX, "frame count must fit in one byte");
 // Only MATCH uses `first`. Other frames need five bytes, not nine. Reserve
 // the exact serialized size when pushing; never truncate a live stack.
-typedef struct { uint8_t size; bool declaration_name, closed_string; Frame frames[MAX_FRAMES]; } Scanner;
+typedef struct { uint8_t size; bool declaration_name, closed_string, decorator_name; Frame frames[MAX_FRAMES]; } Scanner;
 
 static bool space(int32_t c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
 static bool head(int32_t c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
 static bool name(int32_t c) { return head(c) || (c >= '0' && c <= '9') || c == '.'; }
 static void advance(TSLexer *l) { l->advance(l, false); }
+static void skip_layout(TSLexer *l) {
+  while (space(l->lookahead) || l->lookahead == '#') {
+    if (l->lookahead == '#') {
+      while (!l->eof(l) && l->lookahead != '\n') advance(l);
+    } else advance(l);
+  }
+}
 static bool reserved(const char *word) {
   const char *keywords[] = {"def", "type", "law", "match", "case", "do", "return", "for", "exs", "where", "is", "import", "Type", "Data", "Kind", "Quant"};
   for (unsigned i = 0; i < sizeof(keywords)/sizeof(*keywords); ++i)
@@ -105,7 +113,7 @@ unsigned tree_sitter_bend2_external_scanner_serialize(void *p, char *b) {
   Scanner *s = p;
   unsigned n = 0;
   b[n++] = (char)s->size;
-  b[n++] = (char)s->declaration_name;
+  b[n++] = (char)(s->declaration_name | (s->decorator_name << 1));
   b[n++] = (char)s->closed_string;
   for (unsigned i = 0; i < s->size; ++i) {
     Frame f = s->frames[i];
@@ -119,9 +127,9 @@ unsigned tree_sitter_bend2_external_scanner_serialize(void *p, char *b) {
 void tree_sitter_bend2_external_scanner_deserialize(void *p, const char *b, unsigned n) {
   Scanner *s = p;
   s->size = 0;
-  s->declaration_name = s->closed_string = false;
+  s->declaration_name = s->closed_string = s->decorator_name = false;
   if (n < 3 || n > TREE_SITTER_SERIALIZATION_BUFFER_SIZE || (uint8_t)b[0] > MAX_FRAMES
-      || (uint8_t)b[1] > 1 || (uint8_t)b[2] > 1) return;
+      || (uint8_t)b[1] > 3 || (uint8_t)b[2] > 1) return;
   unsigned at = 3;
   for (unsigned i = 0; i < (uint8_t)b[0]; ++i) {
     if (n - at < 5) return;
@@ -137,7 +145,8 @@ void tree_sitter_bend2_external_scanner_deserialize(void *p, const char *b, unsi
   }
   if (at != n) return;
   s->size = (uint8_t)b[0];
-  s->declaration_name = b[1] != 0;
+  s->declaration_name = (b[1] & 1) != 0;
+  s->decorator_name = (b[1] & 2) != 0;
   s->closed_string = b[2] != 0;
 }
 bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v) {
@@ -171,11 +180,35 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     l->result_symbol = STRING_START; return true;
   }
   Frame *top = s->size ? &s->frames[s->size-1] : NULL;
+  if (v[DECORATOR_START] && l->lookahead == '@') {
+    bool close = v[ERROR_SENTINEL] && newline && top
+      && top->kind != PAR && v[frame_end_token(top->kind)];
+    advance(l);
+    if (!close) l->mark_end(l);
+    skip_layout(l);
+    char word[32];
+    if (!read_name(l, word, sizeof(word)) || strcmp(word, "unsafe")) return false;
+    skip_layout(l);
+    if (!read_name(l, word, sizeof(word))
+        || (strcmp(word, "def") && strcmp(word, "type") && strcmp(word, "law"))) return false;
+    if (close) {
+      enum Token end = frame_end_token(top->kind);
+      --s->size; l->result_symbol = end; return true;
+    }
+    if (strcmp(word, "def")) return false; // Only def may have this decorator.
+    s->size = 0;
+    s->decorator_name = true;
+    l->result_symbol = DECORATOR_START; return true;
+  }
   // Recovery must not reinterpret a following declaration's name as a value
   // in the damaged body. Give headers distinct tokens but the same public CST.
-  if (head(l->lookahead) && (v[DEF_KEYWORD] || v[TYPE_KEYWORD] || v[LAW_KEYWORD] || v[DECLARATION_NAME])) {
+  if (head(l->lookahead) && (v[DEF_KEYWORD] || v[TYPE_KEYWORD] || v[LAW_KEYWORD] || v[DECLARATION_NAME] || v[UNSAFE_KEYWORD])) {
     char word[32];
     bool valid_name = read_name(l, word, sizeof(word));
+    if (v[UNSAFE_KEYWORD] && s->decorator_name && !strcmp(word, "unsafe")) {
+      s->decorator_name = false;
+      l->mark_end(l); l->result_symbol = UNSAFE_KEYWORD; return true;
+    }
     if (v[ERROR_SENTINEL] && newline && !strcmp(word, "case") && top && top->kind != PAR) {
       // A same-column sibling arm is a boundary for the damaged arm, not for
       // its owning match. Close only existing scopes above that match.
@@ -204,6 +237,7 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
         }
       }
       s->size = 0;
+      s->decorator_name = false;
       s->declaration_name = true;
       l->mark_end(l); l->result_symbol = t; return true;
     }
@@ -241,6 +275,21 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     }
     if (!space(l->lookahead)) return false;
     l->result_symbol = IMPORT_START; return true;
+  }
+  if (v[AT] && l->lookahead == '@') {
+    advance(l); l->mark_end(l);
+    if (newline && col == 0) {
+      // A fresh decorated definition is not a dependent-type continuation.
+      skip_layout(l);
+      char word[32];
+      read_name(l, word, sizeof(word));
+      if (!strcmp(word, "unsafe")) {
+        skip_layout(l);
+        read_name(l, word, sizeof(word));
+        if (!strcmp(word, "def") || !strcmp(word, "type") || !strcmp(word, "law")) return false;
+      }
+    }
+    l->result_symbol = AT; return true;
   }
   // Keep the immediate GPU opener out of the regular '(' lexer rules:
   // sharing them changes recovery of malformed declaration headers.

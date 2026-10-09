@@ -65,7 +65,7 @@ On the pinned checkout:
   literals, proofs, do notation, templates, parallel lets, arrays and rejection.
 - All seven queries compile in Neovim **0.12.1**; captures, folds, conventional
   indentation and **180 deterministic incremental edits** are checked.
-- **42 declaration-recovery scenarios** check error locality and retained
+- **50 declaration-recovery scenarios** check error locality and retained
   highlight captures; **8 sibling-arm scenarios** also preserve intact
   `case_clause` fields and highlight/fold/context/textobject/local/indent captures
   after missing call/constructor closers, including nested match boundaries.
@@ -75,7 +75,9 @@ On the pinned checkout:
   strings containing case-looking text are checked. Suffix/type-argument cases
   check edited-function fields and captures from all seven query groups.
   Invalid nested `do` bodies additionally check following definition/type/law
-  recovery with LF and CRLF. This does not make ordinary lets or `match` inside
+  recovery with LF and CRLF, including an immediately following `@unsafe`
+  definition. Exact fields and editor capture ranges are checked for retained
+  definitions. This does not make ordinary lets or `match` inside
   `do` valid Bend, or guarantee preservation of the damaged function itself.
 - **53 upgrade checks** cover syntax boundaries, valid lookalikes, deep nesting
   and incremental edits. Standalone C tests exercise scanner serialization,
