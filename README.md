@@ -167,8 +167,10 @@ so there is deliberately no fake C/JS injection query.
 For editor consumers, `gpu_call` still spans `!(`, but now contains separate
 anonymous `!` and `(` children. The modifier capture covers only `!`; bracket
 queries can capture `(` and the enclosing `arguments` node's closing `)`.
-Consumers matching the former combined anonymous `!(` token must update their
-queries. The named node and Tree-sitter ABI 15 are unchanged.
+Previously `gpu_call` was a named leaf spanning `!(`; it is now a named
+composite node. Existing `(gpu_call)` queries remain valid. Consumers assuming
+a leaf or capturing the whole node as the modifier should target its `!` child
+instead. Tree-sitter ABI 15 is unchanged.
 
 ### Recovery while editing
 

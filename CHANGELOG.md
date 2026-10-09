@@ -9,6 +9,8 @@
   real delimiter ownership through malformed GPU calls without a new closing-
   parenthesis indentation rule. Extend LF/CRLF break/repair tests with exact
   field/capture ranges, all editor query groups and valid nesting controls.
+- Correct GPU migration guidance: `gpu_call` changes from a named leaf to a
+  composite node, not from a combined anonymous token.
 
 - Preserve following top-level declarations after invalid nested `do` bodies
   by closing bounded scanner scopes before restarting declaration recovery.
