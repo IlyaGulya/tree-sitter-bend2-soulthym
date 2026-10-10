@@ -343,7 +343,8 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
   if (v[ERROR_SENTINEL]) {
     // Real lexemes are safe recovery anchors too. Otherwise an invalid byte
     // can swallow the next intact literal before any parser state can resume.
-    if (l->lookahead >= '0' && l->lookahead <= '9') return scan_number(l, v);
+    if (l->lookahead >= '0' && l->lookahead <= '9'
+        && !(newline && col < body_column(s))) return scan_number(l, v);
     // Only actual, bounded scope closures are safe to synthesize at EOF. Never
     // push speculative frames while Tree-sitter is trying all recovery tokens.
     if (!top || !l->eof(l)) return false;

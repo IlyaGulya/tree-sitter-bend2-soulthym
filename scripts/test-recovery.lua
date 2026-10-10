@@ -236,6 +236,14 @@ for _, natural in ipairs({ '0n', '1n' }) do
     'def broken(p: Nat) -> Nat:\n  ' .. natural .. '+',
     'def broken(p: Nat) -> Nat:\n  ' .. natural .. '+p')
 end
+review_case('5 damaged array in case before immediate def',
+  'def broken(x: T) -> U32:\n  match x:\n    case x: [a : U32 = x\n  0',
+  'def broken(x: T) -> U32:\n  match x:\n    case x: [a : U32 * x]',
+  { suffix = definition_first })
+review_case('5 damaged nested array before immediate def',
+  'def broken(x: T) -> U32:\n  match x:\n    case x:\n      match x:\n        case x: [a : U32 = x\n  0',
+  'def broken(x: T) -> U32:\n  match x:\n    case x:\n      match x:\n        case x: [a : U32 * x]',
+  { suffix = definition_first })
 review_case('4 damaged parallel value before immediate def',
   'def broken(x: T) -> U32:\n  a b = x x $',
   'def broken(x: T) -> U32:\n  a b = x x\n  0',
