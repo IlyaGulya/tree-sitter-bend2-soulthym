@@ -262,6 +262,20 @@ review_case('4 damaged parallel value before immediate decorated def',
   'def broken(x: T) -> U32:\n  a b = x x $',
   'def broken(x: T) -> U32:\n  a b = x x\n  0',
   { suffix = '\n@unsafe' .. definition_first })
+for _, literal in ipairs({
+  { '"hi"', 'String', 'string', 'string' },
+  { "'a'", 'Char', 'character', 'character' },
+  { '1.5', 'F32', 'float', 'number.float' },
+  { '1n', 'Nat', 'natural', 'number' },
+}) do
+  local start = 'def boundary(b: U32) -> ' .. literal[2] .. ':\n  '
+  local broken = start .. 'f(1) = 3\n  ' .. literal[1]
+  review_case('7 invalid assignment intact literal ' .. literal[3], broken,
+    start .. 'x = 3\n  ' .. literal[1],
+    { prefix = '', suffix = '\ndef after() -> U32: 42\n',
+      retained_integer_function = 'def after() -> U32: 42',
+      edited_integer_function = broken, damaged_line = 'f(1) = 3', terminal = literal })
+end
 local prefix = 'def before() -> U32: 1\n'
 local suffix = '\n' .. [[
 type Recovered is Data: Recovered{}
@@ -371,7 +385,7 @@ local function check_intact_function(def, text, label)
 end
 -- Exact public fields/captures for the small PR #2 boundary fixtures. Unlike
 -- consistency alone, these assertions detect a stable but swallowed body.
-local function check_integer_function(node, text, label, declaration, damaged_line)
+local function check_literal_function(node, text, label, declaration, damaged_line, terminal)
   if text:find('\r\n', 1, true) then declaration = declaration:gsub('\n', '\r\n') end
   local name, parameters, return_type = declaration:match('^def ([%w_]+)(%b())%s*%-%>%s*([%w_]+):')
   if not name then name, parameters = declaration:match('^def ([%w_]+)(%b()):') end
@@ -412,7 +426,9 @@ local function check_integer_function(node, text, label, declaration, damaged_li
   else
     assert(fields.parameters[3]:named_child_count() == 0, label .. ': invented empty parameter')
   end
-  local literal = assert(declaration:match('(%d+)$'))
+  local literal = terminal and terminal[1] or assert(declaration:match('(%d+)$'))
+  local kind = terminal and terminal[3] or 'integer'
+  local highlight = terminal and terminal[4] or 'number'
   local body_first = last - #literal + 1
   local body = def:field('body')
   assert(#body == 1, label .. ': missing integer function body')
@@ -426,7 +442,7 @@ local function check_integer_function(node, text, label, declaration, damaged_li
       if node:type() == 'body' and a == body_first - 1 and b == last
           and not node:has_error() and node:named_child_count() == 1 then
         local value = node:named_child(0)
-        if value:type() == 'integer' then return value end
+        if value:type() == kind then return value end
       end
       for child in node:iter_children() do
         local value = find_terminal(child)
@@ -445,10 +461,10 @@ local function check_integer_function(node, text, label, declaration, damaged_li
     integer = body[1]:named_child(0)
     assert(body[1]:named_child_count() == 1, label .. ': extra clean integer body nodes')
   end
-  assert(integer and integer:type() == 'integer', label .. ': lost terminal integer body node')
+  assert(integer and integer:type() == kind, label .. ': lost terminal ' .. kind .. ' body node')
   check_range(integer, text, body_first, last, label .. ' integer node')
   check_capture(highlights, def, text, 'function', fields.name[1], fields.name[2], label)
-  check_capture(highlights, def, text, 'number', body_first, last, label)
+  check_capture(highlights, def, text, highlight, body_first, last, label)
   for file, captures in pairs({
     folds = { { 'fold', first, last } },
     tags = { { 'definition.function', first, last }, { 'name', fields.name[1], fields.name[2] } },
@@ -815,7 +831,7 @@ for _, case in ipairs(cases) do
     local expected = parse(fixed)
     assert(not expected:has_error(), case[1] .. ': invalid control fixture')
     if case.retained_integer_function then
-      check_integer_function(expected, fixed, case[1] .. ' control', case.retained_integer_function)
+      check_literal_function(expected, fixed, case[1] .. ' control', case.retained_integer_function)
     end
     if case.delimiter then
       local expression = case.delimiter.fixed
@@ -825,9 +841,9 @@ for _, case in ipairs(cases) do
     local function check_damaged(node, label)
       if case.retained_integer_function then
         assert(node:has_error(), label .. ': malformed input must retain a native error')
-        check_integer_function(node, broken, label, case.retained_integer_function)
+        check_literal_function(node, broken, label, case.retained_integer_function)
         if case.edited_integer_function then
-          check_integer_function(node, broken, label, case.edited_integer_function, case.damaged_line)
+          check_literal_function(node, broken, label, case.edited_integer_function, case.damaged_line, case.terminal)
         end
       elseif case[4] then
         assert(node:has_error(), label .. ': broken match must remain an error')
@@ -862,7 +878,7 @@ for _, case in ipairs(cases) do
       local restored = parser:parse()[1]:root()
       assert(vim.deep_equal(signature(restored), signature(expected)), case[1] .. ': repair differs')
       if case.retained_integer_function then
-        check_integer_function(restored, fixed, case[1] .. ' repaired', case.retained_integer_function)
+        check_literal_function(restored, fixed, case[1] .. ' repaired', case.retained_integer_function)
       end
     end
     vim.api.nvim_buf_delete(buf, { force = true })

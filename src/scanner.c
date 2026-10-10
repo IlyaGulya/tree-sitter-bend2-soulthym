@@ -199,7 +199,8 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
   if (!v[ERROR_SENTINEL] && v[PATTERN_SEPARATOR] && l->lookahead == '"') {
     l->result_symbol = PATTERN_SEPARATOR; return true;
   }
-  if (!v[ERROR_SENTINEL] && v[STRING_START] && l->lookahead == '"') {
+  if (v[STRING_START] && l->lookahead == '"'
+      && !(v[ERROR_SENTINEL] && newline && col < body_column(s))) {
     // Probe once per string, keeping the token's end at its opening quote.
     // Valid multiline strings remain valid. If no unescaped closing quote
     // exists, a newline becomes a recovery boundary rather than swallowing
