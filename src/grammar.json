@@ -1631,6 +1631,15 @@
           },
           "named": true,
           "value": "natural"
+        },
+        {
+          "type": "ALIAS",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_successor_natural"
+          },
+          "named": true,
+          "value": "natural"
         }
       ]
     },
@@ -1642,17 +1651,8 @@
           "name": "integer"
         },
         {
-          "type": "SEQ",
-          "members": [
-            {
-              "type": "SYMBOL",
-              "name": "_natural"
-            },
-            {
-              "type": "SYMBOL",
-              "name": "_pattern_natural_end"
-            }
-          ]
+          "type": "SYMBOL",
+          "name": "natural"
         },
         {
           "type": "SYMBOL",
@@ -1819,8 +1819,13 @@
             "type": "SEQ",
             "members": [
               {
-                "type": "SYMBOL",
-                "name": "natural"
+                "type": "ALIAS",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_successor_natural"
+                },
+                "named": true,
+                "value": "natural"
               },
               {
                 "type": "ALIAS",
@@ -4101,25 +4106,8 @@
           "name": "integer"
         },
         {
-          "type": "SEQ",
-          "members": [
-            {
-              "type": "SYMBOL",
-              "name": "_natural"
-            },
-            {
-              "type": "CHOICE",
-              "members": [
-                {
-                  "type": "SYMBOL",
-                  "name": "_pattern_natural_end"
-                },
-                {
-                  "type": "BLANK"
-                }
-              ]
-            }
-          ]
+          "type": "SYMBOL",
+          "name": "_natural"
         },
         {
           "type": "SYMBOL",
@@ -6824,7 +6812,7 @@
     },
     {
       "type": "SYMBOL",
-      "name": "_pattern_natural_end"
+      "name": "_successor_natural"
     },
     {
       "type": "SYMBOL",
