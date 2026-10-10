@@ -226,6 +226,7 @@ local negatives = {
   { 'typed constructor let', source('type Aa is Data: Kk{a: U32, c: U32}\ndef boundary(b: Aa) -> U32:\n  Kk{a, c}: Aa = b\n  0'),
     source('type Aa is Data: Kk{a: U32, c: U32}\ndef boundary(b: Aa) -> U32:\n  Kk{a, c} = b\n  0') },
   { 'lambda case pattern', match_body('x => x'), match_body('x') },
+  { 'spaced natural successor is not sugar', natural_match('1n + 2n'), natural_match('1n+2n') },
   { 'template after plain for', law_body('  for x: U32\n  for ~f: U32 -> U32'),
     law_body('  for ~f: U32 -> U32\n  for x: U32') },
   { 'template after reusable for', law_body('  for +x: U32\n  for ~f: U32 -> U32'),

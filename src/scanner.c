@@ -13,7 +13,7 @@ enum Token {
   DEF_KEYWORD, TYPE_KEYWORD, LAW_KEYWORD, DECLARATION_NAME,
   STRING_START, STRING_NEWLINE, LT, GLUED_LT, GLUED_COMPARISON_END, ERROR_SENTINEL, GPU_OPEN,
   GPU_MODIFIER, CASE_BODY_START, DECORATOR_START, AT, UNSAFE_KEYWORD,
-  PATTERN_SEPARATOR, PATTERN_NATURAL_END, ZERO_NATURAL, NATURAL_PLUS,
+  PATTERN_SEPARATOR, SUCCESSOR_NATURAL, ZERO_NATURAL, NATURAL_PLUS,
 };
 enum Kind { BODY, MATCH, DO, PAR, LAMBDA, WRITE, CASE_HEADER, BLOCK, MATCH_CLOSED_ARM };
 static bool match_frame(uint8_t kind) { return kind == MATCH || kind == MATCH_CLOSED_ARM; }
@@ -86,6 +86,38 @@ static bool typed_assignment(TSLexer *l) {
     }
   }
   return false;
+}
+
+static bool scan_number(TSLexer *l, const bool *v) {
+  bool zero = true;
+  do {
+    zero &= l->lookahead == '0';
+    advance(l);
+  } while (l->lookahead >= '0' && l->lookahead <= '9');
+  enum Token t = INTEGER;
+  if (l->lookahead == 'n') {
+    advance(l);
+    // Literal and glued-successor heads share the public natural node. Their
+    // tokens distinguish eligibility without a trailing zero-width boundary.
+    t = l->lookahead == '+' ? (zero && v[ZERO_NATURAL] ? ZERO_NATURAL : SUCCESSOR_NATURAL) : NATURAL;
+  } else if (l->lookahead == '.') {
+    advance(l);
+    if (l->lookahead < '0' || l->lookahead > '9') return false;
+    t = FLOAT;
+    do { advance(l); } while (l->lookahead >= '0' && l->lookahead <= '9');
+    l->mark_end(l);
+    if (l->lookahead == 'e' || l->lookahead == 'E') {
+      advance(l);
+      if (l->lookahead == '+' || l->lookahead == '-') advance(l);
+      if (l->lookahead < '0' || l->lookahead > '9') {
+        if (!v[FLOAT]) return false;
+        l->result_symbol = FLOAT; return true;
+      }
+      do { advance(l); } while (l->lookahead >= '0' && l->lookahead <= '9');
+    }
+  }
+  if (!v[t] || (t != FLOAT && name(l->lookahead))) return false;
+  l->mark_end(l); l->result_symbol = t; return true;
 }
 static bool push(Scanner *s, uint8_t kind, uint32_t column) {
   if (s->size == MAX_FRAMES) return false;
@@ -308,6 +340,9 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     l->mark_end(l); l->result_symbol = GPU_MODIFIER; return true;
   }
   if (v[ERROR_SENTINEL]) {
+    // Real lexemes are safe recovery anchors too. Otherwise an invalid byte
+    // can swallow the next intact literal before any parser state can resume.
+    if (l->lookahead >= '0' && l->lookahead <= '9') return scan_number(l, v);
     // Only actual, bounded scope closures are safe to synthesize at EOF. Never
     // push speculative frames while Tree-sitter is trying all recovery tokens.
     if (!top || !l->eof(l)) return false;
@@ -355,11 +390,6 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     advance(l); l->mark_end(l); l->result_symbol = GPU_OPEN; return true;
   }
   if (!newline && ((v[CALL_OPEN] && l->lookahead == '(') || (v[INDEX_OPEN] && l->lookahead == '['))) {
-    // Finish a literal natural before its postfix. Expression atoms accept
-    // this boundary too, so neither alternative loses its call/index suffix.
-    if (v[PATTERN_NATURAL_END]) {
-      l->result_symbol = PATTERN_NATURAL_END; return true;
-    }
     l->result_symbol = l->lookahead == '(' ? CALL_OPEN : INDEX_OPEN;
     advance(l); l->mark_end(l); return true;
   }
@@ -519,10 +549,7 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     enum Token t = l->lookahead == '+' ? PLUS : MINUS;
     advance(l);
     if (head(l->lookahead)) {
-      if (t == PLUS && v[PATTERN_NATURAL_END] && spaced) {
-        l->result_symbol = PATTERN_NATURAL_END; return true;
-      }
-      if (t == PLUS && v[PATTERN_SEPARATOR] && !(v[PATTERN_NATURAL_END] && !spaced)) {
+      if (t == PLUS && v[PATTERN_SEPARATOR]) {
         l->result_symbol = PATTERN_SEPARATOR; return true;
       }
       if (v[PARALLEL_END] && top && top->kind == PAR && !top->column) {
@@ -554,17 +581,7 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     if (!space(l->lookahead)) return false;
     l->mark_end(l); l->result_symbol = MOD; return true;
   }
-  // Keep internal infix/GPU tokens available to an expression alternative.
-  // Actual external postfix and arithmetic tokens have already had priority.
-  if (v[PATTERN_NATURAL_END] && v[CALL_OPEN] && l->lookahead &&
-      strchr("&|*/!.", l->lookahead)) return false;
-  // A glued + belongs to the preceding natural's successor sugar, never to
-  // another reusable binder. Plain naturals require this boundary explicitly.
-  bool natural_plus = !spaced && l->lookahead == '+';
-  if (v[PATTERN_NATURAL_END] && !natural_plus) {
-    l->result_symbol = PATTERN_NATURAL_END; return true;
-  }
-  if (v[PATTERN_SEPARATOR] && !(v[PATTERN_NATURAL_END] && natural_plus)) {
+  if (v[PATTERN_SEPARATOR]) {
     int32_t c = l->lookahead;
     if (head(c)) {
       char word[32];
@@ -616,36 +633,8 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     if (!read_name(l, word, sizeof(word)) || reserved(word)) return false;
     l->mark_end(l); l->result_symbol = IDENTIFIER; return true;
   }
-  if ((v[INTEGER] || v[NATURAL] || v[ZERO_NATURAL] || v[FLOAT]) && l->lookahead >= '0' && l->lookahead <= '9') {
-    bool zero = true;
-    do {
-      zero &= l->lookahead == '0';
-      advance(l);
-    } while (l->lookahead >= '0' && l->lookahead <= '9');
-    enum Token t = INTEGER;
-    if (l->lookahead == 'n') {
-      t = zero && v[ZERO_NATURAL] ? ZERO_NATURAL : NATURAL;
-      advance(l);
-    }
-    else if (l->lookahead == '.') {
-      advance(l);
-      if (l->lookahead < '0' || l->lookahead > '9') return false;
-      t = FLOAT;
-      do { advance(l); } while (l->lookahead >= '0' && l->lookahead <= '9');
-      l->mark_end(l);
-      if (l->lookahead == 'e' || l->lookahead == 'E') {
-        advance(l);
-        if (l->lookahead == '+' || l->lookahead == '-') advance(l);
-        if (l->lookahead < '0' || l->lookahead > '9') {
-          if (!v[FLOAT]) return false;
-          l->result_symbol = FLOAT; return true;
-        }
-        do { advance(l); } while (l->lookahead >= '0' && l->lookahead <= '9');
-      }
-    }
-    if (!v[t] || (t != FLOAT && name(l->lookahead))) return false;
-    l->mark_end(l); l->result_symbol = t; return true;
-  }
+  if ((v[INTEGER] || v[NATURAL] || v[ZERO_NATURAL] || v[SUCCESSOR_NATURAL] || v[FLOAT])
+      && l->lookahead >= '0' && l->lookahead <= '9') return scan_number(l, v);
   // Give ordinary grammar tokens a chance to extend the current expression.
   if (strchr("<{|&*/.!=:", l->lookahead) && l->lookahead) return false;
   if (v[PARALLEL_END] && top && top->kind == PAR && !top->column) {

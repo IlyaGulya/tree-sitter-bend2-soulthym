@@ -40,7 +40,8 @@ int main(void) {
   for (unsigned kind = BODY; kind <= MATCH_CLOSED_ARM; ++kind) {
     memset(&s, 0, sizeof(s));
     while (push(&s, kind, UINT32_MAX)) {
-      if (match_frame(kind)) s.frames[s.size - 1].first = s.size % 2 ? UINT32_MAX : 70000;
+      if (kind == MATCH || kind == MATCH_CLOSED_ARM)
+        s.frames[s.size - 1].first = s.size % 2 ? UINT32_MAX : 70000;
       round_trip(&s);
     }
     assert(s.size >= 100);

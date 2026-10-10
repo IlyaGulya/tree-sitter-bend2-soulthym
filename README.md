@@ -56,7 +56,7 @@ dependencies to be installed separately.
 On the integrated parser, using the existing 10-second per-file deadline:
 
 - **1,644 / 1,644 `.bend` files visited**, with a per-file timeout.
-- **1,521 clean parse results**, including the entire 3,009-line standard library,
+- **1,522 clean parse results**, including the entire 3,009-line standard library,
   all demos and the completed non-diagnostic fixtures.
 - **122 reviewed syntax rejections**, pinned in `test/upstream-rejections.json`. These contain
   malformed or removed syntax. Some upstream goldens stop at an *earlier*
@@ -65,7 +65,7 @@ On the integrated parser, using the existing 10-second per-file deadline:
   literals, proofs, do notation, templates, parallel lets, arrays and rejection.
 - All seven queries compile in Neovim **0.12.1**; captures, folds, conventional
   indentation and **180 deterministic incremental edits** are checked.
-- **72 declaration-recovery scenarios** check error locality and retained
+- **104 declaration-recovery scenarios** check error locality and retained
   highlight captures; **36 sibling-arm scenarios** also preserve intact
   `case_clause` fields and highlight/fold/context/textobject/local/indent captures
   after missing call/constructor closers (including calls in let values),
@@ -83,14 +83,19 @@ On the integrated parser, using the existing 10-second per-file deadline:
   and six valid nested-GPU controls cover differently indented closers without
   imposing an alignment rule. This does not make ordinary lets or `match` inside
   `do` valid Bend, or guarantee preservation of the damaged function itself.
-- **53 upgrade checks** cover syntax boundaries, valid lookalikes, deep nesting
-  and incremental edits. Standalone C tests exercise scanner serialization,
-  full-width columns, all frame kinds, capacity and truncated states.
-- The 5.7 MB `bench/checker/proofs_3200/main.bend` timed out, producing one
-  additional failed result rather than a syntax-error location. An isolated
-  comparison with unchanged upstream `917295a` also timed out at the same
-  10-second deadline. No retry, timeout exemption or baseline addition was
-  introduced; the strict full offline gate is not green in this environment.
+  Damaged parallel-let values retain their following definition. Invalid
+  call/index assignment targets retain the edited function's header and clean
+  terminal integer body/capture, without pinning an incidental recovery shape.
+- **85 upgrade checks** cover syntax boundaries, valid lookalikes, deep nesting
+  and incremental edits, including natural-literal binary operands, postfixes
+  and body/capture boundaries before trailing comments. Standalone C tests
+  exercise scanner serialization, full-width columns, all frame kinds, capacity
+  and truncated states.
+- The strict full offline gate passes with no timeout exemptions or baseline
+  additions: the 2.6 MB `generics_3200/main.bend` parsed in **3.65 seconds** and
+  the 5.7 MB `proofs_3200/main.bend` in **5.30 seconds**, under the unchanged
+  10-second deadline. Earlier parser snapshots timed out; these are measured
+  final-parser results, not a guarantee for every machine or workload.
 
 The sweep writes **every file's result** to `build/upstream-report.json`, not
 just failures. New rejections (including diagnostic fixtures) and formerly
