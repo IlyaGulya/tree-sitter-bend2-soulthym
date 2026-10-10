@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Restore comma-free string patterns and contextual infix `&` without changing
+  quantity syntax. Preserve following declarations after parallel/array damage,
+  grouped-pattern siblings and intact literal continuations. Reject invalid
+  assignment targets inside their full edited function; commit completed
+  successor operands before recovery can borrow another statement's value.
+  Extend LF/CRLF native-error ownership, field/capture and repeated-repair tests.
+
 - Preserve arm-free eliminator identities in recursive patterns and named
   bindings. Require an eligible fallback; keep actual eliminator arms and
   expression-shaped fallbacks invalid as patterns. Add LF/CRLF rejection/

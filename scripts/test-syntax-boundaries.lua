@@ -96,6 +96,13 @@ def boundary(n: Nat) -> U32:
   match n:
     case 0n: 0
     case 1n++q: 1]]) },
+  { 'lambda numeric next argument', source('def apply(f: U32 -> U32, n: U32) -> U32: f(n)\ndef boundary() -> U32: apply(x => x 2)') },
+  { 'lambda indented next argument', source('def apply(f: U32 -> U32, n: U32) -> U32: f(n)\ndef boundary(n: U32) -> U32:\n  apply(x =>\n    x\n      n)') },
+  { 'successor reusable next pattern', source('def boundary(a: Nat, b: Nat) -> Nat:\n  match a b:\n    case 0n +y: 0n\n    case 1n+x +y: x') },
+  { 'successor reusable next expression', source('def boundary(x: Nat) -> List<Nat>: [1n+x +x]') },
+  { 'successor rewrite next argument', source('def apply(a: Nat, -b: U32) -> Nat: a\ndef boundary(x: Nat) -> Nat: apply(1n+x %{{==} : {0 == 0 : U32}} : U32; 2)') },
+  { 'successor newline group argument', source('def apply(a: Nat, -b: U32) -> Nat: a\ndef boundary(x: Nat) -> Nat: apply(1n+x\n (2))') },
+  { 'successor newline list argument', source('def boundary(x: Nat) -> List<Nat>: [1n+x\n [x]]') },
   { 'successor lambda operand', source('def boundary() -> Nat: 1n+x => x') },
   { 'successor adjacent inequality', source('def boundary(n: Nat) -> Type: {1n+n!=2n: Nat}') },
   { 'successor trailing comment', source('def boundary(n: Nat) -> Nat: 1n+n # trailing') },
@@ -245,6 +252,10 @@ def boundary(s: String) -> U32:
   { 'ordinary law for/exs/where clauses', law_body(
     '  for x: U32 where {x == x : U32}\n  exs y: U32 where {y == x : U32}') },
 }
+for _, op in ipairs({ '>', '>=', '>>' }) do
+  positives[#positives + 1] = { 'successor comment operator ' .. op,
+    source('def boundary(x: Nat, y: Nat) -> Nat: 1n+x # between\n  ' .. op .. ' y'), op }
+end
 for _, head in ipairs({ '(x)', 'x()', '[x]', 'Kk{x}' }) do
   for _, literal in ipairs({ '0n', '1n' }) do
     positives[#positives + 1] = { 'closed-atom ampersand ' .. head .. '&' .. literal,
@@ -397,6 +408,12 @@ for _, newline in ipairs({ { 'LF', '\n' }, { 'CRLF', '\r\n' } }) do
     check(label, function()
       local expected = parse(text)
       assert(not expected:has_error(), label .. ': legal syntax rejected')
+      if case[1]:find('successor comment operator', 1, true) then
+        local query = vim.treesitter.query.parse('bend2', '(natural_successor value: (_) @operand)')
+        local values = {}
+        for _, n in query:iter_captures(expected, text, 0, -1) do values[#values + 1] = vim.treesitter.get_node_text(n, text) end
+        assert(vim.deep_equal(values, { 'x # between' .. newline[2] .. '  ' .. case[3] .. ' y' }), label .. ': changed successor operand/operator ownership')
+      end
       if case[1]:find('closed-atom ampersand', 1, true) then
         local def = expected:named_child(2) or expected:named_child(1)
         local expression = def:field('body')[1]:named_child(0)

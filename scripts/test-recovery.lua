@@ -276,6 +276,9 @@ for _, literal in ipairs({
       retained_integer_function = 'def after() -> U32: 42',
       edited_integer_function = broken, damaged_line = 'f(1) = 3', terminal = literal })
 end
+review_case('final orphan numeric keeps preceding function clean', '2', '', {})
+review_case('final orphan name keeps completed successor function clean', 'oops', '',
+  { prefix = 'def before(n: Nat) -> Nat: 1n+n\n' })
 local prefix = 'def before() -> U32: 1\n'
 local suffix = '\n' .. [[
 type Recovered is Data: Recovered{}

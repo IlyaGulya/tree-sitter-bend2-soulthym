@@ -65,8 +65,8 @@ On the integrated parser, using the existing 10-second per-file deadline:
   literals, proofs, do notation, templates, parallel lets, arrays and rejection.
 - All seven queries compile in Neovim **0.12.1**; captures, folds, conventional
   indentation and **180 deterministic incremental edits** are checked.
-- **104 declaration-recovery scenarios** check error locality and retained
-  highlight captures; **36 sibling-arm scenarios** also preserve intact
+- **124 declaration-recovery scenarios** check error locality and retained
+  highlight captures; **40 sibling-arm scenarios** also preserve intact
   `case_clause` fields and highlight/fold/context/textobject/local/indent captures
   after missing call/constructor closers (including calls in let values),
   mistyped GPU openers and nested match boundaries. Malformed case-header
@@ -85,7 +85,11 @@ On the integrated parser, using the existing 10-second per-file deadline:
   `do` valid Bend, or guarantee preservation of the damaged function itself.
   Damaged parallel-let values retain their following definition. Invalid
   call/index assignment targets retain the edited function's header and clean
-  terminal integer body/capture, without pinning an incidental recovery shape.
+  terminal literal body/capture (integer, natural, float, character or string),
+  without pinning an incidental recovery shape. Invalid parallel targets also
+  retain their complete edited function and its own error instead of leaving a
+  falsely clean, truncated definition. Grouped-pattern damage retains intact
+  siblings under their actual match.
 - **85 upgrade checks** cover syntax boundaries, valid lookalikes, deep nesting
   and incremental edits, including natural-literal binary operands, postfixes
   and body/capture boundaries before trailing comments. Standalone C tests

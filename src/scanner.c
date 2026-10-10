@@ -121,12 +121,33 @@ static bool scan_number(TSLexer *l, const bool *v) {
 }
 // Commit a completed successor operand before recovery can borrow the next
 // statement's value. Operators/postfixes must still extend valid operands.
-static bool successor_end(TSLexer *l, bool spaced) {
+static bool successor_end(TSLexer *l, bool spaced, bool newline, const bool *v) {
   int32_t c = l->lookahead;
+  // A pending pattern alternative must not reclaim a complete declaration for
+  // a column-zero orphan immediately before a fresh header or EOF.
+  if (newline && l->get_column(l) == 0 && !v[PLUS]
+      && (head(c) || (c >= '0' && c <= '9'))) {
+    char word[32];
+    read_name(l, word, sizeof(word));
+    skip_layout(l);
+    if (l->eof(l)) return false;
+    if (l->get_column(l) == 0 && head(l->lookahead)
+        && read_name(l, word, sizeof(word))
+        && (!strcmp(word, "def") || !strcmp(word, "type") || !strcmp(word, "law"))) return false;
+  }
   if (c == '=' || c == '!') {
     advance(l);
     if ((c == '=' && l->lookahead == '>') || (c == '!' && l->lookahead != '=')) return false;
-  } else if ((c && strchr("+-*/%.<[(|&", c)) || (!spaced && c == '{')) return false;
+  } else if (c == '+' || c == '-') {
+    advance(l);
+    if (!head(l->lookahead) || (c == '-' && l->lookahead == '>')) return false;
+  } else if (c == '%') {
+    advance(l);
+    if (space(l->lookahead)) return false;
+  } else if (c == '(' || c == '[') {
+    if (!newline) return false;
+  } else if ((c == '>' && spaced && (v[GT] || v[GE] || v[SHR]))
+      || (c && strchr("*/.<|&", c)) || (!spaced && c == '{')) return false;
   l->result_symbol = NATURAL_SUCCESSOR_END; return true;
 }
 static bool push(Scanner *s, uint8_t kind, uint32_t column) {
@@ -205,10 +226,22 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     newline |= l->lookahead == '\n'; spaced = true; l->advance(l, true);
   }
   if (!v[ERROR_SENTINEL] && v[NATURAL_SUCCESSOR_END] && l->lookahead == '#') {
-    skip_layout(l); return successor_end(l, true);
+    while (space(l->lookahead) || l->lookahead == '#') {
+      if (l->lookahead == '#') {
+        while (!l->eof(l) && l->lookahead != '\n') advance(l);
+      } else {
+        newline |= l->lookahead == '\n'; advance(l);
+      }
+    }
+    return successor_end(l, true, newline, v);
   }
   if (l->lookahead == '#') return false; // Let the grammar retain comment nodes.
   uint32_t col = l->get_column(l);
+  if (!v[ERROR_SENTINEL] && v[NATURAL_SUCCESSOR_END]
+      && (head(l->lookahead) || (l->lookahead >= '0' && l->lookahead <= '9')
+          || (l->lookahead && strchr("'\"\\@?", l->lookahead)))) {
+    return successor_end(l, spaced, newline, v);
+  }
   if (!v[ERROR_SENTINEL] && v[PATTERN_SEPARATOR] && l->lookahead == '"') {
     l->result_symbol = PATTERN_SEPARATOR; return true;
   }
@@ -358,8 +391,8 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     l->mark_end(l); l->result_symbol = GPU_MODIFIER; return true;
   }
   if (v[ERROR_SENTINEL]) {
-    // Real lexemes are safe recovery anchors too. Otherwise an invalid byte
-    // can swallow the next intact literal before any parser state can resume.
+    // A real numeric lexeme may resume recovery within the current layout,
+    // but must not extend a damaged inner expression across its dedent.
     if (l->lookahead >= '0' && l->lookahead <= '9'
         && !(newline && col < body_column(s))) return scan_number(l, v);
     // Only actual, bounded scope closures are safe to synthesize at EOF. Never
@@ -574,6 +607,9 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     enum Token t = l->lookahead == '+' ? PLUS : MINUS;
     advance(l);
     if (head(l->lookahead)) {
+      if (v[NATURAL_SUCCESSOR_END]) {
+        l->result_symbol = NATURAL_SUCCESSOR_END; return true;
+      }
       if (t == PLUS && v[PATTERN_SEPARATOR]) {
         l->result_symbol = PATTERN_SEPARATOR; return true;
       }
@@ -603,7 +639,10 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
   }
   if (v[MOD] && l->lookahead == '%') {
     advance(l);
-    if (!space(l->lookahead)) return false;
+    if (!space(l->lookahead)) {
+      if (!v[NATURAL_SUCCESSOR_END]) return false;
+      l->result_symbol = NATURAL_SUCCESSOR_END; return true;
+    }
     l->mark_end(l); l->result_symbol = MOD; return true;
   }
   if (v[PATTERN_SEPARATOR]) {
@@ -644,7 +683,7 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     }
     l->result_symbol = GLUED_COMPARISON_END; return true;
   }
-  if (v[NATURAL_SUCCESSOR_END]) return successor_end(l, spaced);
+  if (v[NATURAL_SUCCESSOR_END]) return successor_end(l, spaced, newline, v);
   if (l->lookahead == ';' && (v[DO_MORE] || v[WRITE_MORE])) return false;
   if (l->lookahead == ':' && v[BODY_END] && top && top->kind == LAMBDA) {
     if (typed_assignment(l)) return false;
@@ -667,13 +706,15 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     --s->size; l->result_symbol = PARALLEL_END; return true;
   }
   if (v[BODY_END] && top && (top->kind == BODY || top->kind == LAMBDA || top->kind == BLOCK)) {
-    if (l->lookahead >= '0' && l->lookahead <= '9'
-        && (!newline || col >= top->column)) return false;
+    if (top->kind == BODY && l->lookahead >= '0' && l->lookahead <= '9'
+        && (!newline || col > top->column)) return false;
     if (head(l->lookahead)) {
       // The next state may expect only `)`, so no scanner runs there. Remember
       // a following declaration before a missing closer enters recovery.
       char word[32]; read_name(l, word, sizeof(word));
-      if (!reserved(word) && (!newline || col > top->column)) return false;
+      // Let rejection own an unexpected continuation inside this body. A
+      // dedented orphan must not corrupt the preceding complete declaration.
+      if (top->kind == BODY && !reserved(word) && (!newline || col > top->column)) return false;
       s->declaration_name |= !strcmp(word, "def") || !strcmp(word, "type") || !strcmp(word, "law");
     }
     --s->size; l->result_symbol = BODY_END; return true;
