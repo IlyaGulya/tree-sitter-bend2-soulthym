@@ -196,6 +196,9 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
   }
   if (l->lookahead == '#') return false; // Let the grammar retain comment nodes.
   uint32_t col = l->get_column(l);
+  if (!v[ERROR_SENTINEL] && v[PATTERN_SEPARATOR] && l->lookahead == '"') {
+    l->result_symbol = PATTERN_SEPARATOR; return true;
+  }
   if (!v[ERROR_SENTINEL] && v[STRING_START] && l->lookahead == '"') {
     // Probe once per string, keeping the token's end at its opening quote.
     // Valid multiline strings remain valid. If no unescaped closing quote

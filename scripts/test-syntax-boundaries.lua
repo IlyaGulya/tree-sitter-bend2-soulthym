@@ -121,6 +121,10 @@ def boundary(s: String) -> U32:
   match s:
     case "hi": 0
     case s: 1]]) },
+  { 'comma-free string list pattern', source('def boundary(xs: List<String>) -> U32:\n  ["a" "b"] = xs\n  0') },
+  { 'comma-free string constructor pattern', source('type Strings is Data: Strings{a: String, b: String}\ndef boundary(xs: Strings) -> U32:\n  Strings{"a" "b"} = xs\n  0') },
+  { 'comma-free string pattern after newline/comment', source('def boundary(xs: List<String>) -> U32:\n  ["a" # between patterns\n   "b"] = xs\n  0') },
+  { 'comma-free string list expression', source('def boundary() -> List<String>: ["a" "b"]') },
   { 'list and cons patterns', source([[
 def boundary(xs: List<U32>) -> U32:
   match xs:
@@ -381,6 +385,14 @@ for _, newline in ipairs({ { 'LF', '\n' }, { 'CRLF', '\r\n' } }) do
     check(label, function()
       local expected = parse(text)
       assert(not expected:has_error(), label .. ': legal syntax rejected')
+      if case[1]:find('comma-free string', 1, true) then
+        local query = vim.treesitter.query.parse('bend2', '(string) @literal')
+        local captures = {}
+        for _, n in query:iter_captures(expected, text, 0, -1) do
+          captures[#captures + 1] = vim.treesitter.get_node_text(n, text)
+        end
+        assert(vim.deep_equal(captures, { '"a"', '"b"' }), label .. ': lost exact string nodes/ranges')
+      end
       if not case[1]:find('arm-free eliminator', 1, true) then return end
       -- Adding an actual arm must invalidate a pattern, not silently widen it.
       local broken = text:gsub('\\{', '\\{Kk: a; ', 1)
