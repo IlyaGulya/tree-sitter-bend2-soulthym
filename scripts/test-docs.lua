@@ -22,6 +22,9 @@ end
 
 -- Compile and execute the published CST migration query, not a copied query.
 local readme = table.concat(vim.fn.readfile(root .. '/README.md'), '\n')
+local prose = readme:gsub('%s+', ' ')
+assert(not prose:find('no timeout exemptions or baseline additions', 1, true), 'misleading baseline-additions claim')
+assert(prose:find('The suite also includes negative tests beyond the official Bend examples.', 1, true), 'missing extra negative-test coverage statement')
 local migration = assert(readme:match('```query\n(.-)\n```'), 'missing natural CST migration query')
 vim.treesitter.language.add('bend2', { path = root .. '/build/bend2.so' })
 local query = vim.treesitter.query.parse('bend2', migration)

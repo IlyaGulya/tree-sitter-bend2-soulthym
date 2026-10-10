@@ -91,8 +91,9 @@ On the integrated parser, using the existing 10-second per-file deadline:
   and body/capture boundaries before trailing comments. Standalone C tests
   exercise scanner serialization, full-width columns, all frame kinds, capacity
   and truncated states.
-- The strict full offline gate passes with no timeout exemptions or baseline
-  additions: the 2.6 MB `generics_3200/main.bend` parsed in **3.65 seconds** and
+- The strict full offline gate passes with no timeout exemptions.
+  The suite also includes negative tests beyond the official Bend examples.
+  The 2.6 MB `generics_3200/main.bend` parsed in **3.65 seconds** and
   the 5.7 MB `proofs_3200/main.bend` in **5.30 seconds**, under the unchanged
   10-second deadline. Earlier parser snapshots timed out; these are measured
   final-parser results, not a guarantee for every machine or workload.
