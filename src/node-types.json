@@ -4151,6 +4151,11 @@
     }
   },
   {
+    "type": "gpu_call",
+    "named": true,
+    "fields": {}
+  },
+  {
     "type": "hole",
     "named": true,
     "fields": {
@@ -7578,6 +7583,10 @@
     }
   },
   {
+    "type": "!",
+    "named": false
+  },
+  {
     "type": "!=",
     "named": false
   },
@@ -7785,10 +7794,6 @@
   {
     "type": "for",
     "named": false
-  },
-  {
-    "type": "gpu_call",
-    "named": true
   },
   {
     "type": "identifier",

@@ -65,12 +65,24 @@ On the pinned checkout:
   literals, proofs, do notation, templates, parallel lets, arrays and rejection.
 - All seven queries compile in Neovim **0.12.1**; captures, folds, conventional
   indentation and **180 deterministic incremental edits** are checked.
-- **35 recovery scenarios** additionally check error locality and retained
-  highlight captures; **7 damaged-match scenarios** check consistency and repair
-  only. Each scenario is broken and repaired twice using minimal buffer edits,
-  comparing complete node types/ranges against fresh parses. Suffix/type-argument
-  cases also check the edited function's fields and captures from all seven
-  query groups (including folds, tags, context, textobjects, locals and indents).
+- **72 declaration-recovery scenarios** check error locality and retained
+  highlight captures; **36 sibling-arm scenarios** also preserve intact
+  `case_clause` fields and highlight/fold/context/textobject/local/indent captures
+  after missing call/constructor closers (including calls in let values),
+  mistyped GPU openers and nested match boundaries. Malformed case-header
+  controls preserve the demonstrated intact neighbors.
+  **5 other damaged-match scenarios** check consistency and repair only.
+  Scenarios are broken and repaired twice using minimal buffer edits, comparing
+  complete node types/ranges against fresh parses. LF/CRLF and valid multiline
+  strings containing case-looking text are checked. Suffix/type-argument cases
+  check edited-function fields and captures from all seven query groups.
+  Invalid nested `do` bodies additionally check following definition/type/law
+  recovery with LF and CRLF, including an immediately following `@unsafe`
+  definition. Exact fields, ranges, highlights, tags, folds and textobjects are
+  checked for retained definitions and arms. Delimiter-ownership regressions
+  and six valid nested-GPU controls cover differently indented closers without
+  imposing an alignment rule. This does not make ordinary lets or `match` inside
+  `do` valid Bend, or guarantee preservation of the damaged function itself.
 - **53 upgrade checks** cover syntax boundaries, valid lookalikes, deep nesting
   and incremental edits. Standalone C tests exercise scanner serialization,
   full-width columns, all frame kinds, capacity and truncated states.
@@ -152,6 +164,14 @@ Indentation queries suggest conventional formatting; they do not define the
 language. Native C/JS foreign imports contain **paths**, not embedded source,
 so there is deliberately no fake C/JS injection query.
 
+For editor consumers, `gpu_call` still spans `!(`, but now contains separate
+anonymous `!` and `(` children. The modifier capture covers only `!`; bracket
+queries can capture `(` and the enclosing `arguments` node's closing `)`.
+Previously `gpu_call` was a named leaf spanning `!(`; it is now a named
+composite node. Existing `(gpu_call)` queries remain valid. Consumers assuming
+a leaf or capturing the whole node as the modifier should target its `!` child
+instead. Tree-sitter ABI 15 is unchanged.
+
 ### Recovery while editing
 
 **Policy: preserve useful editor structure through mistakes and report localized
@@ -175,9 +195,16 @@ therefore still extend an accidentally opened string. Multiline content is
 represented by separate `string_content` nodes around physical newlines.
 
 These are tested scenarios, not a guarantee for arbitrary broken programs.
-Recovery **inside a damaged match** remains coarse: later case arms can be
+After a missing call/constructor closer, same-column sibling arms retain their
+`case_clause` nodes and editor captures; calls in let values and nested match
+boundaries are tested too. A GPU modifier is recognized only with a real,
+adjacent opening `(`, so an unfinished `!` cannot invent a GPU opener and steal
+an outer closer. If a real inner opener exists, ordinary nesting still applies:
+`wrap(g!(1)` may close the inner call and report a missing outer `)`; the parser
+cannot infer which closer the author intended to omit.
+Recovery **inside other damaged matches** remains coarse: later case arms can be
 absorbed into an error region, and complicated combinations can also affect
-following declarations. The seven match probes verify repair and incremental
+following declarations. Five such probes verify repair and incremental
 consistency, not highlight preservation for those arms. Fixing the original
 syntax error restores the complete tree.
 

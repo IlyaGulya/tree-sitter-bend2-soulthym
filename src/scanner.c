@@ -11,20 +11,28 @@ enum Token {
   PLUS, MINUS, GT, GE, SHR, MOD, PARALLEL, PARALLEL_START, PARALLEL_VALUE, PARALLEL_END,
   WRITE_START, WRITE_MORE, WRITE_END, IMPORT_START, IMPORT_END, INTEGER, NATURAL, FLOAT, IDENTIFIER,
   DEF_KEYWORD, TYPE_KEYWORD, LAW_KEYWORD, DECLARATION_NAME,
-  STRING_START, STRING_NEWLINE, LT, GLUED_LT, GLUED_COMPARISON_END, ERROR_SENTINEL,
+  STRING_START, STRING_NEWLINE, LT, GLUED_LT, GLUED_COMPARISON_END, ERROR_SENTINEL, GPU_OPEN,
+  GPU_MODIFIER, CASE_BODY_START, DECORATOR_START, AT, UNSAFE_KEYWORD,
 };
-enum Kind { BODY, MATCH, DO, PAR, LAMBDA, WRITE };
+enum Kind { BODY, MATCH, DO, PAR, LAMBDA, WRITE, CASE_HEADER, BLOCK };
 typedef struct { uint32_t column, first; uint8_t kind; } Frame;
 #define MAX_FRAMES 200
 _Static_assert(MAX_FRAMES <= UINT8_MAX, "frame count must fit in one byte");
 // Only MATCH uses `first`. Other frames need five bytes, not nine. Reserve
 // the exact serialized size when pushing; never truncate a live stack.
-typedef struct { uint8_t size; bool declaration_name, closed_string; Frame frames[MAX_FRAMES]; } Scanner;
+typedef struct { uint8_t size; bool declaration_name, closed_string, decorator_name; Frame frames[MAX_FRAMES]; } Scanner;
 
 static bool space(int32_t c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
 static bool head(int32_t c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
 static bool name(int32_t c) { return head(c) || (c >= '0' && c <= '9') || c == '.'; }
 static void advance(TSLexer *l) { l->advance(l, false); }
+static void skip_layout(TSLexer *l) {
+  while (space(l->lookahead) || l->lookahead == '#') {
+    if (l->lookahead == '#') {
+      while (!l->eof(l) && l->lookahead != '\n') advance(l);
+    } else advance(l);
+  }
+}
 static bool reserved(const char *word) {
   const char *keywords[] = {"def", "type", "law", "match", "case", "do", "return", "for", "exs", "where", "is", "import", "Type", "Data", "Kind", "Quant"};
   for (unsigned i = 0; i < sizeof(keywords)/sizeof(*keywords); ++i)
@@ -87,8 +95,17 @@ static bool push(Scanner *s, uint8_t kind, uint32_t column) {
 }
 static uint32_t body_column(const Scanner *s) {
   for (unsigned i = s->size; i; --i)
-    if (s->frames[i-1].kind == BODY || s->frames[i-1].kind == LAMBDA) return s->frames[i-1].column;
+    if (s->frames[i-1].kind == BODY || s->frames[i-1].kind == LAMBDA || s->frames[i-1].kind == BLOCK) return s->frames[i-1].column;
   return 0;
+}
+static inline enum Token frame_end_token(uint8_t kind) {
+  switch (kind) {
+    case MATCH: return MATCH_END;
+    case DO:    return DO_END;
+    case PAR:   return PARALLEL_END;
+    case WRITE: return WRITE_END;
+    default:    return BODY_END;
+  }
 }
 void *tree_sitter_bend2_external_scanner_create(void) { return calloc(1, sizeof(Scanner)); }
 void tree_sitter_bend2_external_scanner_destroy(void *p) { free(p); }
@@ -96,7 +113,7 @@ unsigned tree_sitter_bend2_external_scanner_serialize(void *p, char *b) {
   Scanner *s = p;
   unsigned n = 0;
   b[n++] = (char)s->size;
-  b[n++] = (char)s->declaration_name;
+  b[n++] = (char)(s->declaration_name | (s->decorator_name << 1));
   b[n++] = (char)s->closed_string;
   for (unsigned i = 0; i < s->size; ++i) {
     Frame f = s->frames[i];
@@ -110,15 +127,15 @@ unsigned tree_sitter_bend2_external_scanner_serialize(void *p, char *b) {
 void tree_sitter_bend2_external_scanner_deserialize(void *p, const char *b, unsigned n) {
   Scanner *s = p;
   s->size = 0;
-  s->declaration_name = s->closed_string = false;
+  s->declaration_name = s->closed_string = s->decorator_name = false;
   if (n < 3 || n > TREE_SITTER_SERIALIZATION_BUFFER_SIZE || (uint8_t)b[0] > MAX_FRAMES
-      || (uint8_t)b[1] > 1 || (uint8_t)b[2] > 1) return;
+      || (uint8_t)b[1] > 3 || (uint8_t)b[2] > 1) return;
   unsigned at = 3;
   for (unsigned i = 0; i < (uint8_t)b[0]; ++i) {
     if (n - at < 5) return;
     Frame *f = &s->frames[i];
     f->kind = (uint8_t)b[at++]; f->column = 0; f->first = UINT32_MAX;
-    if (f->kind > WRITE) return;
+    if (f->kind > BLOCK) return;
     for (unsigned j = 0; j < 4; ++j) f->column |= (uint32_t)(uint8_t)b[at++] << (8*j);
     if (f->kind == MATCH) {
       if (n - at < 4) return;
@@ -128,7 +145,8 @@ void tree_sitter_bend2_external_scanner_deserialize(void *p, const char *b, unsi
   }
   if (at != n) return;
   s->size = (uint8_t)b[0];
-  s->declaration_name = b[1] != 0;
+  s->declaration_name = (b[1] & 1) != 0;
+  s->decorator_name = (b[1] & 2) != 0;
   s->closed_string = b[2] != 0;
 }
 bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v) {
@@ -162,17 +180,92 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     l->result_symbol = STRING_START; return true;
   }
   Frame *top = s->size ? &s->frames[s->size-1] : NULL;
+  if (v[DECORATOR_START] && l->lookahead == '@') {
+    bool close = v[ERROR_SENTINEL] && newline && top
+      && top->kind != PAR && v[frame_end_token(top->kind)];
+    advance(l);
+    if (!close) l->mark_end(l);
+    skip_layout(l);
+    char word[32];
+    if (!read_name(l, word, sizeof(word)) || strcmp(word, "unsafe")) return false;
+    skip_layout(l);
+    if (!read_name(l, word, sizeof(word))
+        || (strcmp(word, "def") && strcmp(word, "type") && strcmp(word, "law"))) return false;
+    if (close) {
+      enum Token end = frame_end_token(top->kind);
+      --s->size; l->result_symbol = end; return true;
+    }
+    if (strcmp(word, "def")) return false; // Only def may have this decorator.
+    s->size = 0;
+    s->decorator_name = true;
+    l->result_symbol = DECORATOR_START; return true;
+  }
   // Recovery must not reinterpret a following declaration's name as a value
   // in the damaged body. Give headers distinct tokens but the same public CST.
-  if (head(l->lookahead) && (v[DEF_KEYWORD] || v[TYPE_KEYWORD] || v[LAW_KEYWORD] || v[DECLARATION_NAME])) {
+  if (head(l->lookahead) && (v[DEF_KEYWORD] || v[TYPE_KEYWORD] || v[LAW_KEYWORD] || v[DECLARATION_NAME] || v[UNSAFE_KEYWORD]
+      || (top && top->kind == CASE_HEADER && (v[CASE] || v[MATCH_END])))) {
     char word[32];
     bool valid_name = read_name(l, word, sizeof(word));
+    if (v[UNSAFE_KEYWORD] && s->decorator_name && !strcmp(word, "unsafe")) {
+      s->decorator_name = false;
+      l->mark_end(l); l->result_symbol = UNSAFE_KEYWORD; return true;
+    }
+    if (newline && !strcmp(word, "case") && top && top->kind != PAR
+        && (v[ERROR_SENTINEL] || (top->kind == CASE_HEADER && (v[CASE] || v[MATCH_END])))) {
+      // A same-column sibling arm is a boundary for the damaged arm, not for
+      // its owning match. Close only existing scopes above that match.
+      for (unsigned i = s->size; i > 0; --i) {
+        Frame *owner = &s->frames[i - 1];
+        if (owner->kind != MATCH || (owner->first != col
+            && !(owner->first == UINT32_MAX && col >= owner->column))) continue;
+        if (top->kind == CASE_HEADER && s->size >= 2 && &s->frames[s->size - 2] != owner) {
+          // A damaged inner header has no body to finish. Close its real
+          // inner match before handing the dedented arm back to the outer one.
+          if (!v[MATCH_END]) return false;
+          // The error probe is relexed from its original scanner state. The
+          // resumed normal scan must close both header and actual inner match.
+          s->size -= v[ERROR_SENTINEL] ? 1 : 2;
+          l->result_symbol = MATCH_END; return true;
+        }
+        if ((top->kind == CASE_HEADER || top == owner) && v[CASE]) {
+          l->mark_end(l);
+          owner->first = owner->first == UINT32_MAX ? col : owner->first;
+          // No body exists to close: abandon the damaged header and restart
+          // its sibling under the same owning match, leaving a native error.
+          s->size = i;
+          if (!push(s, CASE_HEADER, col + 1)) return false;
+          l->result_symbol = CASE; return true;
+        }
+        if (top != owner) {
+          enum Token end = frame_end_token(top->kind);
+          if (v[end]) {
+            --s->size; l->result_symbol = end; return true;
+          }
+        }
+        break;
+      }
+    }
     enum Token t = !strcmp(word, "def") ? DEF_KEYWORD : !strcmp(word, "type") ? TYPE_KEYWORD :
       !strcmp(word, "law") ? LAW_KEYWORD : ERROR_SENTINEL;
     if (t != ERROR_SENTINEL && v[t]) {
+      if (v[ERROR_SENTINEL] && !newline && !s->declaration_name) return false;
+      // During recovery, close real scopes before restarting at a root header.
+      // Clearing the frames immediately can strand the parser inside the old
+      // body and make it skip this header and every following declaration.
+      if (v[ERROR_SENTINEL] && newline && col == 0 && top && top->kind != PAR) {
+        enum Token end = frame_end_token(top->kind);
+        if (v[end]) {
+          --s->size; l->result_symbol = end; return true;
+        }
+      }
       s->size = 0;
-      s->declaration_name = true;
-      l->mark_end(l); l->result_symbol = t; return true;
+      s->decorator_name = false;
+      l->mark_end(l);
+      // A missing name must not turn a later parameter into the declaration
+      // name during recovery. Normal parsing still permits multiline headers.
+      skip_layout(l);
+      s->declaration_name = l->lookahead != '(';
+      l->result_symbol = t; return true;
     }
     if (v[DECLARATION_NAME] && (!v[ERROR_SENTINEL] || s->declaration_name) && valid_name && !reserved(word)) {
       s->size = 0;
@@ -187,12 +280,23 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     }
     return false;
   }
+  // Keep genuine GPU prefixes visible to recovery too; unlike a bare '!'
+  // this token cannot invent an opener while recovering a damaged do/header.
+  if (v[GPU_MODIFIER] && l->lookahead == '!') {
+    advance(l);
+    if (l->lookahead != '(') {
+      if (!v[ERROR_SENTINEL] && v[BODY_END] && top && top->kind == BLOCK && l->lookahead == ')') {
+        --s->size; l->result_symbol = BODY_END; return true;
+      }
+      return false;
+    }
+    l->mark_end(l); l->result_symbol = GPU_MODIFIER; return true;
+  }
   if (v[ERROR_SENTINEL]) {
     // Only actual, bounded scope closures are safe to synthesize at EOF. Never
     // push speculative frames while Tree-sitter is trying all recovery tokens.
     if (!top || !l->eof(l)) return false;
-    enum Token t = top->kind == MATCH ? MATCH_END : top->kind == DO ? DO_END :
-      top->kind == PAR ? PARALLEL_END : top->kind == WRITE ? WRITE_END : BODY_END;
+    enum Token t = frame_end_token(top->kind);
     --s->size; l->result_symbol = t; return true;
   }
   if (v[IMPORT_END]) {
@@ -209,6 +313,26 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     }
     if (!space(l->lookahead)) return false;
     l->result_symbol = IMPORT_START; return true;
+  }
+  if (v[AT] && l->lookahead == '@') {
+    advance(l); l->mark_end(l);
+    if (newline && col == 0) {
+      // A fresh decorated definition is not a dependent-type continuation.
+      skip_layout(l);
+      char word[32];
+      read_name(l, word, sizeof(word));
+      if (!strcmp(word, "unsafe")) {
+        skip_layout(l);
+        read_name(l, word, sizeof(word));
+        if (!strcmp(word, "def") || !strcmp(word, "type") || !strcmp(word, "law")) return false;
+      }
+    }
+    l->result_symbol = AT; return true;
+  }
+  // Keep the immediate GPU opener out of the regular '(' lexer rules:
+  // sharing them changes recovery of malformed declaration headers.
+  if (v[GPU_OPEN] && !spaced && l->lookahead == '(') {
+    advance(l); l->mark_end(l); l->result_symbol = GPU_OPEN; return true;
   }
   if (!newline && ((v[CALL_OPEN] && l->lookahead == '(') || (v[INDEX_OPEN] && l->lookahead == '['))) {
     l->result_symbol = l->lookahead == '(' ? CALL_OPEN : INDEX_OPEN;
@@ -230,7 +354,14 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     if (!v[t]) return false;
     l->result_symbol = t; return true;
   }
+  if (v[CASE_BODY_START] && top && top->kind == CASE_HEADER) {
+    top->kind = BODY;
+    l->result_symbol = CASE_BODY_START; return true;
+  }
   if (v[FUNCTION_START] || v[BLOCK_START] || v[LAMBDA_START] || v[DO_START]) {
+    // A genuine declaration name clears prior frames. A live case/layout
+    // stack here means recovery rewound to an old header's colon instead.
+    if (v[FUNCTION_START] && s->size) return false;
     if (v[CALL_OPEN] && l->lookahead && strchr("&|*/.<", l->lookahead)) return false;
     if (head(l->lookahead)) {
       char word[32]; unsigned n = 0;
@@ -247,7 +378,8 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
       return false;
     }
     enum Token t = v[FUNCTION_START] ? FUNCTION_START : v[BLOCK_START] ? BLOCK_START : v[LAMBDA_START] ? LAMBDA_START : DO_START;
-    if (!push(s, t == DO_START ? DO : t == LAMBDA_START ? LAMBDA : BODY, t == FUNCTION_START ? 0 : col)) return false;
+    if (!push(s, t == DO_START ? DO : t == LAMBDA_START ? LAMBDA : t == BLOCK_START ? BLOCK : BODY,
+        t == FUNCTION_START ? 0 : col)) return false;
     l->result_symbol = t; return true;
   }
   // A statement write starts with a real identifier token, not a zero-width
@@ -307,7 +439,8 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     is_case &= !name(l->lookahead);
     bool eligible = is_case && col >= top->column && (top->first == UINT32_MAX || col >= top->first);
     if (eligible && v[CASE]) {
-      if (!push(s, BODY, col + 1)) return false;
+      l->mark_end(l);
+      if (!push(s, CASE_HEADER, col + 1)) return false;
       top->first = top->first == UINT32_MAX ? col : top->first;
       l->result_symbol = CASE; return true;
     }
@@ -351,7 +484,7 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
       }
       return true;
     }
-    if (v[BODY_END] && top && (top->kind == BODY || top->kind == LAMBDA)) {
+    if (v[BODY_END] && top && (top->kind == BODY || top->kind == LAMBDA || top->kind == BLOCK)) {
       s->declaration_name |= !strcmp(word, "def") || !strcmp(word, "type") || !strcmp(word, "law");
       --s->size; l->result_symbol = BODY_END; return true;
     }
@@ -368,7 +501,7 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
         if (v[DO_END] && top->kind == DO) {
           --s->size; l->result_symbol = DO_END; return true;
         }
-        if (v[BODY_END] && (top->kind == BODY || top->kind == LAMBDA)) {
+        if (v[BODY_END] && (top->kind == BODY || top->kind == LAMBDA || top->kind == BLOCK)) {
           --s->size; l->result_symbol = BODY_END; return true;
         }
       }
@@ -445,7 +578,7 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
   if (v[PARALLEL_END] && top && top->kind == PAR && !top->column) {
     --s->size; l->result_symbol = PARALLEL_END; return true;
   }
-  if (v[BODY_END] && top && (top->kind == BODY || top->kind == LAMBDA)) {
+  if (v[BODY_END] && top && (top->kind == BODY || top->kind == LAMBDA || top->kind == BLOCK)) {
     if (head(l->lookahead)) {
       // The next state may expect only `)`, so no scanner runs there. Remember
       // a following declaration before a missing closer enters recovery.
