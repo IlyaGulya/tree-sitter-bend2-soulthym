@@ -236,6 +236,16 @@ for _, natural in ipairs({ '0n', '1n' }) do
     'def broken(p: Nat) -> Nat:\n  ' .. natural .. '+',
     'def broken(p: Nat) -> Nat:\n  ' .. natural .. '+p')
 end
+review_case('6 damaged grouped case pattern',
+  match_start .. '(x $): 0n' .. match_finish,
+  match_start .. '(x): 0n' .. match_finish,
+  { suffix = definition_first, following_cases = siblings, arm_owner_column = 2 })
+local grouped_inner = match_start .. 'A{}:\n      match x:\n        case '
+review_case('6 damaged nested grouped case pattern',
+  grouped_inner .. '(x $): 0n\n        case InnerB{}: 44' .. match_finish,
+  grouped_inner .. '(x): 0n\n        case InnerB{}: 44' .. match_finish,
+  { suffix = definition_first, following_cases = { ['InnerB{}'] = '44', ['B{}'] = '42', ['C{}'] = '43' },
+    arm_owner_column = match_owner_columns })
 review_case('5 damaged array in case before immediate def',
   'def broken(x: T) -> U32:\n  match x:\n    case x: [a : U32 = x\n  0',
   'def broken(x: T) -> U32:\n  match x:\n    case x: [a : U32 * x]',

@@ -36,8 +36,6 @@ export default grammar({
     [$._pattern_list, $.list_expression],
     [$._pattern_constructor, $.constructor_expression],
     [$._named_binding, $._name_parenthesized],
-    [$._pattern, $._name_parenthesized],
-    [$._pattern, $._pattern_parenthesized],
   ],
   rules: {
     source_file: $ => seq(repeat($.import_statement), repeat($._declaration)),
@@ -142,8 +140,11 @@ export default grammar({
     _pattern_parenthesized: $ => seq('(', $._block_start,
       field('body', alias($._destructuring_pattern, $.body)),
       optional(seq(':', field('type', $._expression))), $._body_end, ')'),
+    // Share the grouped-pattern prefix until ')' or ',' decides its owner.
+    // An early _pattern reduction can discard the real closer during recovery.
     _pattern_tuple: $ => seq('(', $._block_start,
-      field('element', alias($._pattern, $.body)), $._body_end, ',',
+      field('element', choice(alias($._name_pattern, $.body),
+        alias($._destructuring_pattern, $.body))), $._body_end, ',',
       commaSep1($._pattern), optional(seq(':', field('type', $._expression))), ')'),
     _pattern_list: $ => seq('[', optional(patternSep1($, $._pattern)), ']'),
     _pattern_cons: $ => prec.right(5, seq(field('left', $._pattern), field('operator', '<>'), field('right', $._pattern))),

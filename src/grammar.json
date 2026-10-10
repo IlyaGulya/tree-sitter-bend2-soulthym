@@ -2076,13 +2076,27 @@
           "type": "FIELD",
           "name": "element",
           "content": {
-            "type": "ALIAS",
-            "content": {
-              "type": "SYMBOL",
-              "name": "_pattern"
-            },
-            "named": true,
-            "value": "body"
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "ALIAS",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_name_pattern"
+                },
+                "named": true,
+                "value": "body"
+              },
+              {
+                "type": "ALIAS",
+                "content": {
+                  "type": "SYMBOL",
+                  "name": "_destructuring_pattern"
+                },
+                "named": true,
+                "value": "body"
+              }
+            ]
           }
         },
         {
@@ -6726,14 +6740,6 @@
     [
       "_named_binding",
       "_name_parenthesized"
-    ],
-    [
-      "_pattern",
-      "_name_parenthesized"
-    ],
-    [
-      "_pattern",
-      "_pattern_parenthesized"
     ]
   ],
   "precedences": [],
