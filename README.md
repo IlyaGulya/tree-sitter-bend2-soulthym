@@ -200,6 +200,20 @@ composite node. Existing `(gpu_call)` queries remain valid. Consumers assuming
 a leaf or capturing the whole node as the modifier should target its `!` child
 instead. Tree-sitter ABI 15 is unchanged.
 
+The glued successor `1n+2n` also changes public tree shape: previously it was
+`binary_expression` with `left`, `operator`, and `right` fields; now it is
+`natural_successor` with an unfielded leading `natural`, an anonymous `+`, and
+`value: (natural)`. Spaced arithmetic remains a binary expression. Queries using
+the old binary fields must target the successor instead; anchor the first named
+child so the tail is not also captured as the prefix:
+
+```query
+(natural_successor
+  . (natural) @prefix
+  "+" @operator
+  value: (_) @value)
+```
+
 ### Recovery while editing
 
 **Policy: preserve useful editor structure through mistakes and report localized

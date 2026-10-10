@@ -7,6 +7,10 @@
   expression-shaped fallbacks invalid as patterns. Add LF/CRLF rejection/
   repair controls and a public-CST regression without changing scanner state.
 
+- Document the public CST migration for glued `1n+2n`: binary
+  `left/operator/right` fields become an unfielded successor head and `value`.
+  Provide and execute the replacement query with exact LF/CRLF capture ranges.
+
 - Preserve binary `&` after natural literals and keep trailing comments outside
   natural-valued body fields. Distinguish literal and glued-successor tokens
   without a trailing zero-width natural token.
