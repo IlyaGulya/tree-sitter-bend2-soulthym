@@ -2341,8 +2341,22 @@
                 "type": "FIELD",
                 "name": "operator",
                 "content": {
-                  "type": "STRING",
-                  "value": "&"
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "STRING",
+                      "value": "&"
+                    },
+                    {
+                      "type": "ALIAS",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "_amp"
+                      },
+                      "named": false,
+                      "value": "&"
+                    }
+                  ]
                 }
               },
               {
@@ -4978,8 +4992,22 @@
                 "type": "FIELD",
                 "name": "operator",
                 "content": {
-                  "type": "STRING",
-                  "value": "&"
+                  "type": "CHOICE",
+                  "members": [
+                    {
+                      "type": "STRING",
+                      "value": "&"
+                    },
+                    {
+                      "type": "ALIAS",
+                      "content": {
+                        "type": "SYMBOL",
+                        "name": "_amp"
+                      },
+                      "named": false,
+                      "value": "&"
+                    }
+                  ]
                 }
               },
               {
@@ -6913,6 +6941,10 @@
     {
       "type": "SYMBOL",
       "name": "_natural_plus"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_amp"
     }
   ],
   "inline": [

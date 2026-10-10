@@ -26,7 +26,7 @@ export default grammar({
     $._string_start, $._string_newline,
     $._lt, $._glued_lt, $._glued_comparison_end, $._error_sentinel, $._gpu_open,
     $._gpu_modifier, $._case_body_start, $._decorator_start, $._at, $._unsafe_keyword,
-    $._pattern_separator, $._successor_natural, $._zero_natural, $._natural_plus,
+    $._pattern_separator, $._successor_natural, $._zero_natural, $._natural_plus, $._amp,
   ],
   inline: $ => [$._natural],
   conflicts: $ => [
@@ -239,7 +239,7 @@ function patternSep1($, rule) {
 
 function binary($, operand, minimum) {
   return choice(...[
-    [0, '->', true], [1, '&', true], [1, '|', true], [2, '||'], [3, '&&'],
+    [0, '->', true], [1, choice('&', alias($._amp, '&')), true], [1, '|', true], [2, '||'], [3, '&&'],
     [4, alias($._lt, '<')], [4, '<='], [4, alias($._gt, '>')], [4, alias($._ge, '>=')],
     [5, '<>', true], [5, '++', true], [5, '<&>', true],
     [6, '.|.'], [7, '.^.'], [8, '.&.'], [9, '<<'], [9, alias($._shr, '>>')],

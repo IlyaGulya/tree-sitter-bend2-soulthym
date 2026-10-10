@@ -13,7 +13,7 @@ enum Token {
   DEF_KEYWORD, TYPE_KEYWORD, LAW_KEYWORD, DECLARATION_NAME,
   STRING_START, STRING_NEWLINE, LT, GLUED_LT, GLUED_COMPARISON_END, ERROR_SENTINEL, GPU_OPEN,
   GPU_MODIFIER, CASE_BODY_START, DECORATOR_START, AT, UNSAFE_KEYWORD,
-  PATTERN_SEPARATOR, SUCCESSOR_NATURAL, ZERO_NATURAL, NATURAL_PLUS,
+  PATTERN_SEPARATOR, SUCCESSOR_NATURAL, ZERO_NATURAL, NATURAL_PLUS, AMP,
 };
 enum Kind { BODY, MATCH, DO, PAR, LAMBDA, WRITE, CASE_HEADER, BLOCK, MATCH_CLOSED_ARM };
 static bool match_frame(uint8_t kind) { return kind == MATCH || kind == MATCH_CLOSED_ARM; }
@@ -381,6 +381,12 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
       }
     }
     l->result_symbol = AT; return true;
+  }
+  // Infix '&' is a different role from a prefix quantity '&0'/'&1'/'&2'.
+  if (v[AMP] && !v[GLUED_COMPARISON_END] && l->lookahead == '&') {
+    advance(l);
+    if (l->lookahead == '&') return false;
+    l->mark_end(l); l->result_symbol = AMP; return true;
   }
   // A glued natural successor consumes exactly one '+', even before another
   // '+' or a numeric tail. Do not let arithmetic '+' / '++' steal this prefix.

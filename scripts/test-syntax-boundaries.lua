@@ -242,6 +242,15 @@ def boundary(s: String) -> U32:
   { 'ordinary law for/exs/where clauses', law_body(
     '  for x: U32 where {x == x : U32}\n  exs y: U32 where {y == x : U32}') },
 }
+for _, head in ipairs({ '(x)', 'x()', '[x]', 'Kk{x}' }) do
+  for _, literal in ipairs({ '0n', '1n' }) do
+    positives[#positives + 1] = { 'closed-atom ampersand ' .. head .. '&' .. literal,
+      source('type Aa is Data: Kk{a: Nat}\ndef boundary(x: Nat) -> Nat: ' .. head .. '&' .. literal) }
+  end
+end
+for _, quantity in ipairs({ '&0', '&1', '&2' }) do
+  positives[#positives + 1] = { 'genuine quantity ' .. quantity, source('def boundary() -> Quant: ' .. quantity) }
+end
 -- Exercise the recursive boundary too: an expression cannot hide inside a
 -- constructor, list, tuple, parentheses, or the tail of a natural pattern.
 local negatives = {
@@ -385,6 +394,14 @@ for _, newline in ipairs({ { 'LF', '\n' }, { 'CRLF', '\r\n' } }) do
     check(label, function()
       local expected = parse(text)
       assert(not expected:has_error(), label .. ': legal syntax rejected')
+      if case[1]:find('closed-atom ampersand', 1, true) then
+        local def = expected:named_child(2) or expected:named_child(1)
+        local expression = def:field('body')[1]:named_child(0)
+        assert(expression:type() == 'binary_expression', label .. ': lost binary expression')
+        assert(vim.treesitter.get_node_text(expression:field('operator')[1], text) == '&', label .. ': lost ampersand field')
+        local right = expression:field('right')[1]
+        assert(right:type() == 'natural' and vim.treesitter.get_node_text(right, text):match('^[01]n$'), label .. ': split natural operand')
+      end
       if case[1]:find('comma-free string', 1, true) then
         local query = vim.treesitter.query.parse('bend2', '(string) @literal')
         local captures = {}
