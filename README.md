@@ -61,7 +61,7 @@ On the integrated parser, using the existing 10-second per-file deadline:
 - **122 reviewed syntax rejections**, pinned in `test/upstream-rejections.json`. These contain
   malformed or removed syntax. Some upstream goldens stop at an *earlier*
   semantic error, so “expects an error” alone is not used as an exemption.
-- **41 corpus cases**, covering tree shape, precedence, column ownership,
+- **42 corpus cases**, covering tree shape, precedence, column ownership,
   literals, proofs, do notation, templates, parallel lets, arrays and rejection.
 - All seven queries compile in Neovim **0.12.1**; captures, folds, conventional
   indentation and **180 deterministic incremental edits** are checked.
@@ -181,8 +181,10 @@ constructors, lists, tuples and natural successors. Same-line `f (1)` and
 separates them. Empty `()` suffixes preserve eligible patterns, and `0n+name`
 (including leading-zero spellings) preserves name binders, as in the compiler.
 Typed and parallel lets bind names, not destructuring patterns; grouped/reusable
-names and these identity forms remain supported. Erased `-` lets take a direct
-name. Law templates (`for ~...`) must precede ordinary `for`/`exs` clauses.
+names and these identity forms remain supported. Arm-free `\{pattern}`
+wrappers preserve an eligible fallback; eliminators with arms remain expressions,
+not patterns. Typed/parallel wrappers still require name fallbacks. Erased `-`
+lets take a direct name. Law templates (`for ~...`) must precede ordinary `for`/`exs` clauses.
 
 Constructor resolution/arity, resolved-name eligibility, literal limits, pattern
 counts and computed-match eligibility remain compiler-owned. `npm run test:syntax`

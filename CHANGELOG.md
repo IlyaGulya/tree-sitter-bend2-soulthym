@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Preserve arm-free eliminator identities in recursive patterns and named
+  bindings. Require an eligible fallback; keep actual eliminator arms and
+  expression-shaped fallbacks invalid as patterns. Add LF/CRLF rejection/
+  repair controls and a public-CST regression without changing scanner state.
+
 - Preserve binary `&` after natural literals and keep trailing comments outside
   natural-valued body fields. Distinguish literal and glued-successor tokens
   without a trailing zero-width natural token.

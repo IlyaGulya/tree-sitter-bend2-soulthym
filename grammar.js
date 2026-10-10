@@ -109,7 +109,10 @@ export default grammar({
       alias($._pattern_reusable, $.reusable_expression),
       alias($._name_parenthesized, $.parenthesized_expression),
       alias($._name_call, $.call_expression),
-      alias($._name_successor, $.natural_successor)),
+      alias($._name_successor, $.natural_successor),
+      alias($._name_eliminator, $.eliminator)),
+    // With no arms, parse_term_base returns the fallback unchanged.
+    _name_eliminator: $ => seq('\\', '{', field('fallback', $._name_pattern), optional(';'), '}'),
     _pattern_reusable: $ => prec(12, seq('+', $._name_pattern)),
     _name_parenthesized: $ => seq('(', $._block_start,
       field('body', alias($._name_pattern, $.body)),
@@ -127,7 +130,9 @@ export default grammar({
       alias($._pattern_tuple, $.tuple_expression),
       alias($._pattern_list, $.list_expression),
       alias($._pattern_cons, $.binary_expression),
-      alias($._pattern_call, $.call_expression)),
+      alias($._pattern_call, $.call_expression),
+      alias($._pattern_eliminator, $.eliminator)),
+    _pattern_eliminator: $ => seq('\\', '{', field('fallback', $._destructuring_pattern), optional(';'), '}'),
     _pattern_constructor: $ => seq(field('name', $.identifier), token.immediate('{'), optional(patternSep1($, $._pattern)), '}'),
     _pattern_successor: $ => prec.right(-1, choice(
       seq(alias($._successor_natural, $.natural), alias($._natural_plus, '+'), field('value', $._pattern)),

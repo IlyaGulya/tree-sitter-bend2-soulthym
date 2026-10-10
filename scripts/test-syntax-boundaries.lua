@@ -212,6 +212,25 @@ def boundary(s: String) -> U32:
   { 'zero-successor list case', list_match('[0n+a, 00n+b()]') },
   { 'zero-successor tuple case', tuple_match('(0n+a, 00n+b())') },
   { 'zero-successor natural tail', natural_match('1n+00n+n()') },
+  -- With no arms the compiler returns the fallback unchanged. Preserve that
+  -- identity only when its fallback is eligible in the surrounding context.
+  { 'arm-free eliminator case binder', source('def boundary(n: U32) -> U32:\n  match n:\n    case \\{x}: x') },
+  { 'arm-free eliminator ordinary binder', let_body('\\{x} = b') },
+  { 'arm-free eliminator typed binder', let_body('\\{x}: U32 = b') },
+  { 'arm-free eliminator parallel binder', let_body('\\{x} y = b 1') },
+  { 'arm-free eliminator reusable typed binder', let_body('\\{+x}: U32 = b') },
+  { 'nested arm-free eliminator typed binder', let_body('\\{\\{x;};}: U32 = b') },
+  { 'arm-free eliminator zero-successor binder', let_body('0n+\\{x}: U32 = b') },
+  { 'arm-free eliminators in constructor pattern', call_match('Kk{\\{a}, \\{c}}') },
+  { 'arm-free eliminator constructor fallback', match_body('\\{Kk{a, c}}') },
+  { 'arm-free eliminators in list pattern', list_match('[\\{a}, \\{b}]') },
+  { 'arm-free eliminator list fallback', list_match('\\{[a, b]}') },
+  { 'arm-free eliminators in tuple pattern', tuple_match('(\\{a}, \\{b})') },
+  { 'arm-free eliminator natural tail', natural_match('1n+\\{n}') },
+  { 'empty-call arm-free eliminator binder', call_let('\\{b}() = b') },
+  { 'comma-free arm-free eliminator case binders', source('def boundary(a: U32, b: U32) -> U32:\n  match a b:\n    case \\{x} \\{y}: 0') },
+  { 'comma-free arm-free eliminators in constructor', call_match('Kk{\\{a} \\{c}}') },
+  { 'comma-free arm-free eliminators in list', list_match('[\\{a} \\{b}]') },
   { 'leading multiple law templates and quantified clauses', law_body(
     '  for ~f: U32 -> U32\n  for ~g: U32 -> U32\n  for +x: U32\n  for -y: U32') },
   { 'law templates followed by for/exs constraints', law_body(
@@ -222,6 +241,16 @@ def boundary(s: String) -> U32:
 -- Exercise the recursive boundary too: an expression cannot hide inside a
 -- constructor, list, tuple, parentheses, or the tail of a natural pattern.
 local negatives = {
+  { 'eliminator arms in case pattern', call_match('\\{Kk: a; b}'), call_match('a') },
+  { 'eliminator arms in ordinary binding', constructor_let('\\{Kk: a; c} = b'), constructor_let('x = b') },
+  { 'eliminator arms in typed binding', let_body('\\{Kk: x; y}: U32 = b'), let_body('x: U32 = b') },
+  { 'eliminator arms in parallel binding', let_body('\\{Kk: x; y} z = b 1'), let_body('x z = b 1') },
+  { 'eliminator arms nested in constructor', call_match('Kk{\\{Kk: a; c}, c}'), call_match('Kk{a, c}') },
+  { 'eliminator lambda fallback is not a pattern', call_match('\\{x => x}'), call_match('a') },
+  { 'eliminator call fallback is not a pattern', call_match('\\{b(1)}'), call_match('b') },
+  { 'empty eliminator is not a pattern', match_body('\\{}'), match_body('x') },
+  { 'eliminator constructor fallback is not a typed name', constructor_let('\\{Kk{a, c}}: Aa = b'),
+    constructor_let('x: Aa = b') },
   { 'call assignment target', let_body('f(1) = 3'), let_body('x = 3') },
   { 'typed constructor let', source('type Aa is Data: Kk{a: U32, c: U32}\ndef boundary(b: Aa) -> U32:\n  Kk{a, c}: Aa = b\n  0'),
     source('type Aa is Data: Kk{a: U32, c: U32}\ndef boundary(b: Aa) -> U32:\n  Kk{a, c} = b\n  0') },
@@ -349,7 +378,26 @@ for _, newline in ipairs({ { 'LF', '\n' }, { 'CRLF', '\r\n' } }) do
   end
   for _, case in ipairs(positives) do
     local label, text = case[1] .. ' ' .. newline[1], lines(case[2])
-    check(label, function() assert(not parse(text):has_error(), label .. ': legal syntax rejected') end)
+    check(label, function()
+      local expected = parse(text)
+      assert(not expected:has_error(), label .. ': legal syntax rejected')
+      if not case[1]:find('arm-free eliminator', 1, true) then return end
+      -- Adding an actual arm must invalidate a pattern, not silently widen it.
+      local broken = text:gsub('\\{', '\\{Kk: a; ', 1)
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(text:sub(1, -2), '\n', { plain = true }))
+      local parser = vim.treesitter.get_parser(buf, 'bend2')
+      parser:parse()
+      for _ = 1, 2 do
+        edit(buf, text, broken)
+        local changed = parser:parse()[1]:root()
+        assert(changed:has_error(), label .. ': eliminator arm accepted as a pattern')
+        assert(fingerprint(changed) == fingerprint(parse(broken)), label .. ': incremental arm rejection differs')
+        edit(buf, broken, text)
+        assert(fingerprint(parser:parse()[1]:root()) == fingerprint(expected), label .. ': identity repair differs')
+      end
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
   end
   for _, case in ipairs(negatives) do
     local label = case[1] .. ' ' .. newline[1]

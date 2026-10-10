@@ -590,7 +590,7 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     }
     // parse_term_ops treats even spaced ( and [ as postfix on the same line.
     // A comma bypasses this token; a newline genuinely starts another term.
-    if ((c >= '0' && c <= '9') || c == '\'' || c == '"' ||
+    if ((c >= '0' && c <= '9') || c == '\'' || c == '"' || c == '\\' ||
         (newline && (c == '(' || c == '['))) {
       l->result_symbol = PATTERN_SEPARATOR; return true;
     }
