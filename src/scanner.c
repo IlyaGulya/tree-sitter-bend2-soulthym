@@ -299,9 +299,7 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
       // internal recovery lexer can consume this header as another word.
       enum Token end = frame_end_token(top->kind);
       if (v[end]) {
-        // The next state may wait for a missing closer without scanning the
-        // header again; remember its name just as ordinary BODY_END does.
-        s->declaration_name = true;
+        // Closing an old scope does not consume a fresh declaration keyword.
         --s->size; l->result_symbol = end; return true;
       }
     }

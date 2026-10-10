@@ -236,6 +236,14 @@ for _, natural in ipairs({ '0n', '1n' }) do
     'def broken(p: Nat) -> Nat:\n  ' .. natural .. '+',
     'def broken(p: Nat) -> Nat:\n  ' .. natural .. '+p')
 end
+review_case('4 damaged parallel value before immediate def',
+  'def broken(x: T) -> U32:\n  a b = x x $',
+  'def broken(x: T) -> U32:\n  a b = x x\n  0',
+  { suffix = definition_first })
+review_case('4 damaged parallel value before immediate decorated def',
+  'def broken(x: T) -> U32:\n  a b = x x $',
+  'def broken(x: T) -> U32:\n  a b = x x\n  0',
+  { suffix = '\n@unsafe' .. definition_first })
 local prefix = 'def before() -> U32: 1\n'
 local suffix = '\n' .. [[
 type Recovered is Data: Recovered{}
