@@ -96,6 +96,9 @@ def boundary(n: Nat) -> U32:
   match n:
     case 0n: 0
     case 1n++q: 1]]) },
+  { 'successor lambda operand', source('def boundary() -> Nat: 1n+x => x') },
+  { 'successor adjacent inequality', source('def boundary(n: Nat) -> Type: {1n+n!=2n: Nat}') },
+  { 'successor trailing comment', source('def boundary(n: Nat) -> Nat: 1n+n # trailing') },
   { 'natural-valued arm ends before the next case', source([[
 def boundary(n: Nat) -> Nat:
   match n:
@@ -439,6 +442,45 @@ for _, newline in ipairs({ { 'LF', '\n' }, { 'CRLF', '\r\n' } }) do
       local function damaged(node, context)
         assert(node:has_error(), label .. context .. ': malformed syntax accepted')
         check_following(node, broken, label .. context)
+        -- Intact assignment headers must own the error and continuation.
+        if case[2]:find('def boundary', 1, true) and case[2]:find(' = ', 1, true)
+            and case[2]:find('\n  0', 1, true) then
+          local crlf = newline[1] == 'CRLF'
+          local first = assert(broken:find('def boundary', 1, true))
+          local last = assert(broken:find(crlf and '\r\n  0\r\n' or '\n  0\n', first, true))
+          last = last + (crlf and 4 or 3)
+          local def
+          for child in node:iter_children() do
+            local name = child:field('name')[1]
+            if name and vim.treesitter.get_node_text(name, broken) == 'boundary' then def = child end
+          end
+          assert(def and def:has_error(), label .. context .. ': edited function absent or falsely clean')
+          assert(select(3, def:start()) == first - 1 and select(3, def:end_()) == last,
+            label .. context .. ': edited function truncated or borrowed source')
+          for _, field in ipairs({ 'name', 'parameters', 'return_type' }) do
+            local parts = def:field(field)
+            assert(#parts == 1 and not parts[1]:has_error(), label .. context .. ': damaged intact header ' .. field)
+          end
+          local highlights = vim.treesitter.query.parse('bend2', table.concat(vim.fn.readfile('queries/highlights.scm'), '\n'))
+          local captured = false
+          for id, n in highlights:iter_captures(def, broken, 0, -1) do
+            captured = captured or (highlights.captures[id] == 'number'
+              and select(3, n:start()) == last - 1 and select(3, n:end_()) == last)
+          end
+          assert(captured, label .. context .. ': lost exact terminal number capture')
+          local found = false
+          local function terminal(n)
+            if n:type() == 'ERROR' then return end
+            if n:type() == 'body' and not n:has_error() and n:named_child_count() == 1 then
+              local value = n:named_child(0)
+              found = found or (value:type() == 'integer' and select(3, value:start()) == last - 1
+                and select(3, value:end_()) == last)
+            end
+            for child in n:iter_children() do terminal(child) end
+          end
+          terminal(def:field('body')[1])
+          assert(found, label .. context .. ': terminal integer detached from edited body')
+        end
       end
       damaged(parse(broken), ' (fresh)')
       buf = vim.api.nvim_create_buf(false, true)

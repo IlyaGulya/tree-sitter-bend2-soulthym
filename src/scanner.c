@@ -13,7 +13,7 @@ enum Token {
   DEF_KEYWORD, TYPE_KEYWORD, LAW_KEYWORD, DECLARATION_NAME,
   STRING_START, STRING_NEWLINE, LT, GLUED_LT, GLUED_COMPARISON_END, ERROR_SENTINEL, GPU_OPEN,
   GPU_MODIFIER, CASE_BODY_START, DECORATOR_START, AT, UNSAFE_KEYWORD,
-  PATTERN_SEPARATOR, SUCCESSOR_NATURAL, ZERO_NATURAL, NATURAL_PLUS, AMP,
+  PATTERN_SEPARATOR, SUCCESSOR_NATURAL, ZERO_NATURAL, NATURAL_PLUS, AMP, NATURAL_SUCCESSOR_END,
 };
 enum Kind { BODY, MATCH, DO, PAR, LAMBDA, WRITE, CASE_HEADER, BLOCK, MATCH_CLOSED_ARM };
 static bool match_frame(uint8_t kind) { return kind == MATCH || kind == MATCH_CLOSED_ARM; }
@@ -119,6 +119,16 @@ static bool scan_number(TSLexer *l, const bool *v) {
   if (!v[t] || (t != FLOAT && name(l->lookahead))) return false;
   l->mark_end(l); l->result_symbol = t; return true;
 }
+// Commit a completed successor operand before recovery can borrow the next
+// statement's value. Operators/postfixes must still extend valid operands.
+static bool successor_end(TSLexer *l, bool spaced) {
+  int32_t c = l->lookahead;
+  if (c == '=' || c == '!') {
+    advance(l);
+    if ((c == '=' && l->lookahead == '>') || (c == '!' && l->lookahead != '=')) return false;
+  } else if ((c && strchr("+-*/%.<[(|&", c)) || (!spaced && c == '{')) return false;
+  l->result_symbol = NATURAL_SUCCESSOR_END; return true;
+}
 static bool push(Scanner *s, uint8_t kind, uint32_t column) {
   if (s->size == MAX_FRAMES) return false;
   unsigned bytes = 3 + 5 * (s->size + 1) + (match_frame(kind) ? 4 : 0);
@@ -193,6 +203,9 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
   bool newline = l->get_column(l) == 0, spaced = false;
   while (space(l->lookahead)) {
     newline |= l->lookahead == '\n'; spaced = true; l->advance(l, true);
+  }
+  if (!v[ERROR_SENTINEL] && v[NATURAL_SUCCESSOR_END] && l->lookahead == '#') {
+    skip_layout(l); return successor_end(l, true);
   }
   if (l->lookahead == '#') return false; // Let the grammar retain comment nodes.
   uint32_t col = l->get_column(l);
@@ -334,6 +347,9 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
   if (v[GPU_MODIFIER] && l->lookahead == '!') {
     advance(l);
     if (l->lookahead != '(') {
+      if (!v[ERROR_SENTINEL] && v[NATURAL_SUCCESSOR_END] && l->lookahead == '=') {
+        l->result_symbol = NATURAL_SUCCESSOR_END; return true;
+      }
       if (!v[ERROR_SENTINEL] && v[BODY_END] && top && top->kind == BLOCK && l->lookahead == ')') {
         --s->size; l->result_symbol = BODY_END; return true;
       }
@@ -628,6 +644,7 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     }
     l->result_symbol = GLUED_COMPARISON_END; return true;
   }
+  if (v[NATURAL_SUCCESSOR_END]) return successor_end(l, spaced);
   if (l->lookahead == ';' && (v[DO_MORE] || v[WRITE_MORE])) return false;
   if (l->lookahead == ':' && v[BODY_END] && top && top->kind == LAMBDA) {
     if (typed_assignment(l)) return false;
@@ -650,10 +667,13 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     --s->size; l->result_symbol = PARALLEL_END; return true;
   }
   if (v[BODY_END] && top && (top->kind == BODY || top->kind == LAMBDA || top->kind == BLOCK)) {
+    if (l->lookahead >= '0' && l->lookahead <= '9'
+        && (!newline || col >= top->column)) return false;
     if (head(l->lookahead)) {
       // The next state may expect only `)`, so no scanner runs there. Remember
       // a following declaration before a missing closer enters recovery.
       char word[32]; read_name(l, word, sizeof(word));
+      if (!reserved(word) && (!newline || col > top->column)) return false;
       s->declaration_name |= !strcmp(word, "def") || !strcmp(word, "type") || !strcmp(word, "law");
     }
     --s->size; l->result_symbol = BODY_END; return true;

@@ -1658,6 +1658,10 @@
               "type": "SYMBOL",
               "name": "_name_pattern"
             }
+          },
+          {
+            "type": "SYMBOL",
+            "name": "_natural_successor_end"
           }
         ]
       }
@@ -1935,6 +1939,10 @@
                   "type": "SYMBOL",
                   "name": "_pattern"
                 }
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_natural_successor_end"
               }
             ]
           },
@@ -1966,6 +1974,10 @@
                   "type": "SYMBOL",
                   "name": "_destructuring_pattern"
                 }
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_natural_successor_end"
               }
             ]
           }
@@ -4408,6 +4420,10 @@
               "type": "SYMBOL",
               "name": "_expression"
             }
+          },
+          {
+            "type": "SYMBOL",
+            "name": "_natural_successor_end"
           }
         ]
       }
@@ -6951,6 +6967,10 @@
     {
       "type": "SYMBOL",
       "name": "_amp"
+    },
+    {
+      "type": "SYMBOL",
+      "name": "_natural_successor_end"
     }
   ],
   "inline": [
