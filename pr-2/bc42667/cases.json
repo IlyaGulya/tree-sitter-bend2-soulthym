@@ -1,0 +1,30 @@
+[
+  {
+    "id": "assignment",
+    "title": "Assignment targets must be patterns",
+    "subtitle": "Calls with arguments are not binding patterns.",
+    "source": "import Base\n\ndef boundary(b: U32) -> U32:\n  f(1) = 3\n  0\n\ndef after() -> U32:\n  42\n",
+    "repair": "import Base\n\ndef boundary(b: U32) -> U32:\n  f = 3\n  0\n\ndef after() -> U32:\n  42\n"
+  },
+  {
+    "id": "typed-let",
+    "title": "Typed lets bind a name",
+    "subtitle": "Destructure separately; a typed let cannot bind a constructor pattern.",
+    "source": "import Base\n\ntype Aa is Data: Kk{a: U32, c: U32}\n\ndef boundary(b: Aa) -> U32:\n  Kk{a, c}: Aa = b\n  0\n\ndef after() -> U32:\n  42\n",
+    "repair": "import Base\n\ntype Aa is Data: Kk{a: U32, c: U32}\n\ndef boundary(b: Aa) -> U32:\n  value: Aa = b\n  0\n\ndef after() -> U32:\n  42\n"
+  },
+  {
+    "id": "case-pattern",
+    "title": "Case patterns are not lambdas",
+    "subtitle": "Recursive constructor / literal / list / tuple patterns remain supported.",
+    "source": "import Base\n\ntype Aa is Data: Kk{a: U32, c: U32}\n\ndef boundary(b: Aa) -> U32:\n  match b:\n    case x => x: 0\n\ndef after() -> U32:\n  42\n",
+    "repair": "import Base\n\ntype Aa is Data: Kk{a: U32, c: U32}\n\ndef boundary(b: Aa) -> U32:\n  match b:\n    case Kk{a, c}: 0\n\ndef after() -> U32:\n  42\n"
+  },
+  {
+    "id": "templates",
+    "title": "Law templates must come first",
+    "subtitle": "A template clause cannot follow an ordinary quantified clause.",
+    "source": "import Base\n\nlaw boundary:\n  for x: U32\n  for ~f: U32 -> U32\n  U32\n\ndef after() -> U32:\n  42\n",
+    "repair": "import Base\n\nlaw boundary:\n  for ~f: U32 -> U32\n  for x: U32\n  U32\n\ndef after() -> U32:\n  42\n"
+  }
+]
