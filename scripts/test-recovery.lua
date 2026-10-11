@@ -276,6 +276,49 @@ for _, literal in ipairs({
       retained_integer_function = 'def after() -> U32: 42',
       edited_integer_function = broken, damaged_line = 'f(1) = 3', terminal = literal })
 end
+review_case('design damaged lambda successor before fresh header',
+  'def broken() -> Nat -> Nat:\n  $x => 1n+x',
+  'def broken() -> Nat -> Nat:\n  x => 1n+x',
+  { prefix = '', suffix = '\ndef after(): 42\n', retained_integer_function = 'def after(): 42' })
+review_case('design malformed array with intact string before fresh header',
+  'def broken(x: T):\n  [a : U32 = x\n  "s"',
+  'def broken(x: T):\n  [a : U32 * x]',
+  { prefix = '', suffix = '\ndef after(): 42\n', retained_integer_function = 'def after(): 42' })
+for _, damage in ipairs({
+  { 'array natural tail', 'def broken(x: T):\n  [a : U32 = x\n  0n+x', 'def broken(x: T):\n  [a : U32 * x]' },
+  { 'array literal tail', 'def broken(x: T):\n  [a : U32 = x\n  0n', 'def broken(x: T):\n  [a : U32 * x]' },
+  { 'eliminator grouped damage', 'def broken(x: T):\n  (\\{x} $)', 'def broken(x: T):\n  (\\{x})' },
+  { 'extra assignment', 'def broken(x: Nat, y: Nat) -> Nat:\n  x = y = x x\n  0',
+    'def broken(x: Nat, y: Nat) -> Nat:\n  x = y; x = x\n  0' },
+}) do
+  review_case('structural ' .. damage[1], damage[2], damage[3],
+    { prefix = '', suffix = '\ndef after(): 42\n', retained_integer_function = 'def after(): 42', owned = true })
+end
+for _, pattern in ipairs({
+  { 'incomplete annotation', '(x:)', '(x: T)' },
+  { 'successor tuple closer', '[1n+(x,y]', '[1n+(x,y)]' },
+  { 'zero successor tuple closer', '[0n+(x,y]', '[0n+(x,y)]' },
+  { 'eliminator fallback', '\\{($x)}', '\\{(x)}' },
+  { 'eliminator opener', '\\1{x}', '\\{x}' },
+}) do
+  local start = 'def broken(x: T):\n  match x:\n    case '
+  local finish = '\n    case y: 42\n    case z: 43'
+  review_case('structural ' .. pattern[1], start .. pattern[2] .. ': 0' .. finish,
+    start .. pattern[3] .. ': 0' .. finish,
+    { prefix = '', suffix = '\ndef after(): 42\n', retained_integer_function = 'def after(): 42',
+      following_cases = { y = '42', z = '43' }, arm_owner_column = 2, owned = true })
+end
+for _, successor in ipairs({ '1n+n', '0n+n' }) do
+  for _, orphan in ipairs({ 'oops', '2', 'x y', '"hi"', "'a'" }) do
+    for _, ending in ipairs({ 'ordinary', 'decorated', 'EOF' }) do
+      local before = 'def before(n: Nat) -> Nat: ' .. successor
+      review_case('structural orphan ' .. successor .. ' ' .. orphan .. ' ' .. ending, orphan, '',
+        { prefix = before .. '\n', preceding_function = before,
+          suffix = ending == 'EOF' and '\n' or (ending == 'decorated' and '\n@unsafe' .. definition_first or definition_first),
+          orphan_eof = ending == 'EOF' })
+    end
+  end
+end
 review_case('final orphan numeric keeps preceding function clean', '2', '', {})
 review_case('final orphan name keeps completed successor function clean', 'oops', '',
   { prefix = 'def before(n: Nat) -> Nat: 1n+n\n' })
@@ -634,7 +677,8 @@ local function check_following_cases(node, text, label, expected, owner_column)
     check_range(body, text, body_start, last, label .. ' following body ' .. pattern)
     for _, spec in ipairs({
       { 'keyword.conditional', first, first + 3 },
-      { 'constructor', pattern_start, pattern_start + #pattern - 3 },
+      { pattern:sub(-2) == '{}' and 'constructor' or 'variable', pattern_start,
+        pattern_start + #pattern - (pattern:sub(-2) == '{}' and 3 or 1) },
       { 'number', body_start, last },
     }) do
       check_capture(highlights, arm, text, spec[1], spec[2], spec[3], label .. ' following arm highlights')
@@ -643,7 +687,8 @@ local function check_following_cases(node, text, label, expected, owner_column)
     for id, capture in highlights:iter_captures(arm, text, 0, -1) do
       got[highlights.captures[id] .. ':' .. vim.treesitter.get_node_text(capture, text)] = true
     end
-    for _, wanted in ipairs({ 'keyword.conditional:case', 'constructor:' .. pattern:sub(1, -3), 'number:' .. value }) do
+    for _, wanted in ipairs({ 'keyword.conditional:case',
+      (pattern:sub(-2) == '{}' and 'constructor:' .. pattern:sub(1, -3) or 'variable:' .. pattern), 'number:' .. value }) do
       assert(got[wanted], label .. ': lost following-arm highlight ' .. wanted)
     end
     local _, _, arm_start = arm:start()
@@ -672,7 +717,7 @@ local function check_following_cases(node, text, label, expected, owner_column)
     for file, captures in pairs({
       context = { { 'context.end', body_start, last } },
       textobjects = { { 'conditional.inner', body_start, last } },
-      locals = { { 'local.reference', pattern_start, pattern_start + #pattern - 3 } },
+      locals = { { 'local.reference', pattern_start, pattern_start + #pattern - (pattern:sub(-2) == '{}' and 3 or 1) } },
       indents = { { 'indent.align', pattern_start, pattern_start + #pattern - 1 } },
     }) do
       for _, spec in ipairs(captures) do
@@ -842,11 +887,26 @@ for _, case in ipairs(cases) do
       check_delimiter_owner(expected, fixed, case[1] .. ' control', case.delimiter.kind, expression)
     end
     local function check_damaged(node, label)
-      if case.retained_integer_function then
+      if case.preceding_function then
+        assert(node:has_error(), label .. ': orphan must remain an error')
+        local before
+        for child in node:iter_children() do
+          local name = child:field('name')[1]
+          if name and vim.treesitter.get_node_text(name, broken) == 'before' then before = child end
+        end
+        local control = case.preceding_function
+        if case.crlf then control = control:gsub('\n', '\r\n') end
+        assert(before and not before:has_error(), label .. ': orphan damaged preceding declaration')
+        assert(vim.deep_equal(signature(before), signature(parse(control):named_child(0))), label .. ': preceding fields/ranges changed')
+        if not case.orphan_eof then check_neighbors(node, broken, label) end
+      elseif case.retained_integer_function then
         assert(node:has_error(), label .. ': malformed input must retain a native error')
         check_literal_function(node, broken, label, case.retained_integer_function)
         if case.edited_integer_function then
           check_literal_function(node, broken, label, case.edited_integer_function, case.damaged_line, case.terminal)
+        end
+        if case.following_cases then
+          check_following_cases(node, broken, label, case.following_cases, case.arm_owner_column)
         end
       elseif case[4] then
         assert(node:has_error(), label .. ': broken match must remain an error')
@@ -859,6 +919,29 @@ for _, case in ipairs(cases) do
         if case[5] then check_edited_function(node, broken, label, case[5]) end
         if case.following_cases then
           check_following_cases(node, broken, label, case.following_cases, case.arm_owner_column)
+        end
+      end
+      if case.owned then
+        local source = case[2]
+        if case.crlf then source = source:gsub('\n', '\r\n') end
+        local first, last = source_range(broken, source)
+        local def
+        for child in node:iter_children() do
+          local name = child:field('name')[1]
+          if name and vim.treesitter.get_node_text(name, broken) == 'broken' then def = child end
+        end
+        assert(def and def:has_error(), label .. ': edited declaration lost error ownership')
+        check_range(def, broken, first, last, label .. ' edited declaration')
+        for _, field in ipairs({ 'name', 'parameters', 'return_type' }) do
+          local parts = def:field(field)
+          for _, part in ipairs(parts) do assert(not part:has_error(), label .. ': damaged intact header ' .. field) end
+          assert(field == 'return_type' or #parts == 1, label .. ': missing intact header ' .. field)
+        end
+        local body = def:field('body')[1]
+        assert(body, label .. ': edited body detached')
+        for _, file in ipairs({ 'folds', 'context', 'textobjects', 'locals', 'indents' }) do
+          check_capture(structure_queries[file].query, def, broken, structure_queries[file].capture,
+            first, last, label .. ' edited ' .. file)
         end
       end
       if case.delimiter then
