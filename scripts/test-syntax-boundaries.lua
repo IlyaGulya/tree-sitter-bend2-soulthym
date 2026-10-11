@@ -425,7 +425,42 @@ positives[#positives + 1] = { 'array constructor type ownership', source('def bo
 for _, atom in ipairs({ '@a: Type -> a', '1n+x' }) do
   negatives[#negatives + 1] = { 'array full-expression type steals size delimiter ' .. atom,
     source('def boundary(x: Nat) -> Nat: [x: ' .. atom .. ' * 2n]'),
-    source('def boundary(x: Nat) -> Nat: [x: (' .. atom .. ') * 2n]') }
+    source('def boundary(x: Nat) -> Nat: [x: (' .. atom .. ') * 2n]'), function(tree, text, label)
+      local field = atom:sub(1, 1) == '@' and 'codomain' or 'value'
+      local kind = field == 'codomain' and 'dependent_type' or 'natural_successor'
+      local query = vim.treesitter.query.parse('bend2', '(' .. kind .. ' ' .. field .. ': (_) @operand)')
+      local operands = {}
+      for _, n in query:iter_captures(tree, text, 0, -1) do
+        assert(not n:has_error(), label .. ': damaged intact inner full expression')
+        operands[#operands + 1] = vim.treesitter.get_node_text(n, text)
+      end
+      assert(vim.deep_equal(operands, { (field == 'codomain' and 'a' or 'x') .. ' * 2n' }),
+        label .. ': stolen inner operator or truncated full operand')
+      local def
+      for child in tree:iter_children() do
+        local name = child:field('name')[1]
+        if name and vim.treesitter.get_node_text(name, text) == 'boundary' then def = child end
+      end
+      assert(def and def:has_error(), label .. ': edited declaration/error ownership lost')
+      for _, name in ipairs({ 'name', 'parameters', 'return_type', 'body' }) do
+        local parts = def:field(name)
+        assert(#parts == 1 and (name == 'body' or not parts[1]:has_error()), label .. ': damaged intact header ' .. name)
+      end
+      local first, last = assert(text:find('[x: ' .. atom .. ' * 2n]', 1, true))
+      local body = def:field('body')[1]
+      assert(select(3, body:start()) == first - 1 and select(3, body:end_()) == last, label .. ': body boundaries changed')
+      local real_closer = false
+      local function inspect(n)
+        local a, b = select(3, n:start()), select(3, n:end_())
+        if n:type() == ']' and a == last - 1 and b == last and not n:missing() then real_closer = true end
+        if n:type() == 'ERROR' or n:missing() then
+          assert(a >= first - 1 and b <= last, label .. ': error crosses body/header boundary')
+        end
+        for child in n:iter_children() do inspect(child) end
+      end
+      inspect(def)
+      assert(real_closer, label .. ': real array/list closer was lost or synthesized')
+    end }
 end
 
 local suffix = '\ntype SyntaxAfter is Data: SyntaxAfter{}\n'
@@ -527,6 +562,7 @@ for _, newline in ipairs({ { 'LF', '\n' }, { 'CRLF', '\r\n' } }) do
       local function damaged(node, context)
         assert(node:has_error(), label .. context .. ': malformed syntax accepted')
         check_following(node, broken, label .. context)
+        if case[4] then case[4](node, broken, label .. context) end
         -- Intact assignment headers must own the error and continuation.
         if case[2]:find('def boundary', 1, true) and case[2]:find(' = ', 1, true)
             and case[2]:find('\n  0', 1, true) then

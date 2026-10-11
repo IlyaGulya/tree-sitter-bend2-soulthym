@@ -43,7 +43,7 @@ static Probe probe(const char *text) {
     .mark_end = probe_mark, .get_column = probe_column, .eof = probe_eof}};
 }
 static void checkpoint_tests(void) {
-  bool v[BODY_ENTRY + 1] = {0}; v[BODY_ENTRY] = true;
+  bool v[ARRAY_TYPE_END + 1] = {0}; v[BODY_ENTRY] = true;
   for (unsigned phase = PAR; phase <= PAR_HEADER; phase += PAR_HEADER - PAR) {
     Scanner s = {0}; assert(push(&s, BODY, 0) && push(&s, phase, 2));
     Probe p = probe("Type");
@@ -60,6 +60,21 @@ static void checkpoint_tests(void) {
       round_trip(&s);
     }
   }
+  // Live value phases retain the full serialized payload, including flags.
+  for (unsigned flags = 0; flags < 8; ++flags) {
+    for (unsigned i = 0; i < 3; ++i) {
+      uint32_t counts[] = {0, 1, UINT32_MAX};
+      Scanner s = {.declaration_name = flags & 1, .decorator_name = flags & 2, .closed_string = flags & 4};
+      assert(push(&s, BODY, 7) && push(&s, PAR, counts[i]));
+      char before[TREE_SITTER_SERIALIZATION_BUFFER_SIZE], after[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
+      unsigned n = tree_sitter_bend2_external_scanner_serialize(&s, before);
+      Probe p = probe("Type");
+      assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+      assert(p.lexer.result_symbol == BODY_ENTRY && p.at == 0 && p.end == 0);
+      assert(tree_sitter_bend2_external_scanner_serialize(&s, after) == n && !memcmp(before, after, n));
+      round_trip(&s);
+    }
+  }
   Scanner s = {0}; assert(push(&s, BODY, 0) && push(&s, PAR_HEADER, 2));
   v[ERROR_SENTINEL] = true; Probe p = probe("Type");
   assert(!tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
@@ -73,7 +88,7 @@ static void checkpoint_tests(void) {
     char state[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
     unsigned bytes = tree_sitter_bend2_external_scanner_serialize(&s, state);
     Scanner restored = {0}; tree_sitter_bend2_external_scanner_deserialize(&restored, state, bytes);
-    bool terms[BODY_ENTRY + 1] = {0}; terms[WRITE_START] = terms[IDENTIFIER] = terms[STRING_START] = true;
+    bool terms[ARRAY_TYPE_END + 1] = {0}; terms[WRITE_START] = terms[IDENTIFIER] = terms[STRING_START] = true;
     p = probe(literal ? "\"s\"" : "Type");
     bool ok = tree_sitter_bend2_external_scanner_scan(&restored, &p.lexer, terms);
     assert(ok == (literal != 0));
