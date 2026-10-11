@@ -386,6 +386,56 @@ for _, spec in ipairs({
     { prefix = '', suffix = '\ndef after() -> U32: 42\n', retained_integer_function = 'def after() -> U32: 42',
       following_cases = { ['B{}'] = '42', ['C{}'] = '43' }, arm_owner_column = 2 })
 end
+-- Ownership inventory: introduced losses must not be hidden by broad-suite counts.
+-- Fixed vectors from the pre-change inventory; no expectation is weakened.
+for index, term in ipairs({
+  { "[x: K=ind(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "[x: K:ind(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "[x: K;ind(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "[x: K,ind(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "[x: K)ind(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "[x: K]ind(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "[x: K}ind(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "[x: Ki=nd(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "[x: Ki:nd(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "[x: Ki;nd(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "[x: Ki,nd(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "[x: Ki)nd(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "[x: Ki]nd(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "[x: Ki}nd(Type) ^ 2n]", "[x: Kind(Type) ^ 2n]" },
+  { "1n+x\n[0]", "1n+x[0]" },
+  { "1n+ x\\{x}", "1n+\\{x}" },
+  { "1n++x\\{x}", "1n+\\{x}" },
+  { "1n+\\{x}}", "1n+\\{x}" },
+  { "1n+\\{x};", "1n+\\{x}" },
+  { "1n+\\{x},", "1n+\\{x}" },
+  { "1n+\\{x})", "1n+\\{x}" },
+  { "1n+\\{x}]", "1n+\\{x}" },
+  { "1n+ x@a:Type->a", "1n+@a:Type->a" },
+  { "1n++x@a:Type->a", "1n+@a:Type->a" },
+  { "1n+g\n(x => x)", "1n+g(x => x)" },
+  { "1n+g()x => x)", "1n+g(x => x)" },
+  { "1n+1n\nx", "1n+1n+x" },
+  { "0n+0n\nx", "0n+0n+x" },
+}) do
+  review_case('arm ownership inventory ' .. index, match_review_header .. 'A{}: ' .. term[1] .. match_review_tail,
+    match_review_header .. 'A{}: ' .. term[2] .. match_review_tail,
+    { suffix = definition_first,
+      following_cases = { ['B{}'] = '42', ['C{}'] = '43' }, arm_owner_column = 2 })
+end
+-- A dedented orphan after a completed match must stay outside that function,
+-- regardless of the later root token. Do not predict a future case/header.
+for _, value in ipairs({ '1n+1n', '42', 'x' }) do
+  for _, orphan in ipairs({ 'x', '2', ';', '$', '^' }) do
+    for _, ending in ipairs({ 'ordinary', 'decorated', 'EOF' }) do
+      local before = 'def before(x: T) -> U32:\n  match x:\n    case A{}: ' .. value
+      review_case('completed match boundary ' .. value .. ' ' .. orphan .. ' ' .. ending, orphan, '',
+        { prefix = before .. '\n', preceding_function = before,
+          suffix = ending == 'EOF' and '\n' or (ending == 'decorated' and '\n@unsafe' .. definition_first or definition_first),
+          orphan_eof = ending == 'EOF' })
+    end
+  end
+end
 for _, successor in ipairs({ '1n+n', '0n+n' }) do
   for _, orphan in ipairs({ 'oops', '2', 'x y', '"hi"', "'a'" }) do
     for _, ending in ipairs({ 'ordinary', 'decorated', 'EOF' }) do
