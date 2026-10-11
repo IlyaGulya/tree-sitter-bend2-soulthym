@@ -18,6 +18,7 @@ static void round_trip(Scanner *s) {
   assert(restored.header_checkpoint == s->header_checkpoint);
   assert(restored.case_header == s->case_header);
   assert(restored.case_column == s->case_column);
+  assert(restored.array_checkpoint == s->array_checkpoint);
   for (unsigned i = 0; i < s->size; ++i) {
     assert(restored.frames[i].kind == s->frames[i].kind);
     assert(restored.frames[i].column == s->frames[i].column);
@@ -50,7 +51,7 @@ static Probe probe(const char *text) {
     .mark_end = probe_mark, .get_column = probe_column, .eof = probe_eof}};
 }
 static void checkpoint_tests(void) {
-  bool v[ROOT_LAYOUT + 1] = {0}; v[BODY_ENTRY] = true;
+  bool v[ARRAY_LAYOUT + 1] = {0}; v[BODY_ENTRY] = true;
   for (unsigned phase = PAR; phase <= PAR_HEADER; phase += PAR_HEADER - PAR) {
     Scanner s = {0}; assert(push(&s, BODY, 0) && push(&s, phase, 2));
     Probe p = probe("Type");
@@ -95,7 +96,7 @@ static void checkpoint_tests(void) {
     char state[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
     unsigned bytes = tree_sitter_bend2_external_scanner_serialize(&s, state);
     Scanner restored = {0}; tree_sitter_bend2_external_scanner_deserialize(&restored, state, bytes);
-    bool terms[ROOT_LAYOUT + 1] = {0}; terms[WRITE_START] = terms[IDENTIFIER] = terms[STRING_START] = true;
+    bool terms[ARRAY_LAYOUT + 1] = {0}; terms[WRITE_START] = terms[IDENTIFIER] = terms[STRING_START] = true;
     p = probe(literal ? "\"s\"" : "Type");
     bool ok = tree_sitter_bend2_external_scanner_scan(&restored, &p.lexer, terms);
     assert(ok == (literal != 0));
@@ -105,8 +106,8 @@ static void checkpoint_tests(void) {
   puts("BODY_ENTRY: zero-width, only stale header retired, actual values retained, error-mode inert, 300 entries bounded, phase persists before string/builtin lexing.");
 }
 static void ownership_tests(void) {
-  bool all[ROOT_LAYOUT + 1]; memset(all, 1, sizeof(all));
-  bool v[ROOT_LAYOUT + 1] = {0};
+  bool all[ARRAY_LAYOUT + 1]; memset(all, 1, sizeof(all));
+  bool v[ARRAY_LAYOUT + 1] = {0};
   Scanner s = {0}; v[DEF_KEYWORD] = true;
   Probe p = probe("def after");
   assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
@@ -223,7 +224,7 @@ static void ownership_tests(void) {
   puts("Ownership: fresh keyword/name checkpoint, initial/continuation semicolons, normal-only case frames, closed patterns, interrupted PAR owners and validated pending payloads passed.");
 }
 static void terminal_body_tests(void) {
-  bool v[ROOT_LAYOUT + 1] = {0}; v[BODY_END] = v[ROOT_LAYOUT] = true;
+  bool v[ARRAY_LAYOUT + 1] = {0}; v[BODY_END] = v[ROOT_LAYOUT] = v[ARRAY_LAYOUT] = true;
   Scanner s = {0}; assert(push(&s, BODY, 0)); Probe p = probe("$");
   assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
   assert(p.lexer.result_symbol == BODY_END && !s.size && !p.end); round_trip(&s);
@@ -236,17 +237,17 @@ static void terminal_body_tests(void) {
 static void arm_phase_tests(void) {
   Scanner s = {0}; assert(push(&s, BODY, 0) && push(&s, MATCH, 0));
   s.frames[1].first = 4; assert(push(&s, CASE_HEADER, 5));
-  bool v[ROOT_LAYOUT + 1] = {0}; v[CASE_BODY_START] = true;
+  bool v[ARRAY_LAYOUT + 1] = {0}; v[CASE_BODY_START] = true;
   Probe p = probe("     x"); assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
   assert(s.frames[2].kind == CASE_ARM && s.size == 3); round_trip(&s);
-  memset(v, 0, sizeof(v)); v[BODY_END] = true;
+  memset(v, 0, sizeof(v)); v[ARM_END] = true;
   for (unsigned i = 0; i < 5; ++i) {
     const char *invalid[] = {"     ;", "     )", "     ]", "     ^", "     $"};
     p = probe(invalid[i]); assert(!tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
     assert(s.size == 3 && s.frames[2].kind == CASE_ARM); round_trip(&s);
   }
   p = probe("\n;"); assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
-  assert(p.lexer.result_symbol == BODY_END && s.size == 2); round_trip(&s);
+  assert(p.lexer.result_symbol == ARM_END && s.size == 2); round_trip(&s);
   char bytes[TREE_SITTER_SERIALIZATION_BUFFER_SIZE]; Scanner restored = {0};
   assert(push(&s, CASE_ARM, 5)); unsigned n = tree_sitter_bend2_external_scanner_serialize(&s, bytes);
   // Kind is bounded; its actual match owner and case column are validated too.
@@ -262,19 +263,19 @@ static void arm_phase_tests(void) {
   puts("CASE_ARM: normal-owned phase, five-byte payload, actual owner validation, suffix stays inside arm, dedented semicolon closes it.");
 }
 static void completed_owner_tests(void) {
-  Scanner s = {0}; assert(push(&s, BODY, 0) && push(&s, MATCH, 0)); s.frames[1].first = 4;
-  bool v[ROOT_LAYOUT + 1] = {0}, all[ROOT_LAYOUT + 1]; memset(all, 1, sizeof(all));
-  v[MATCH_END] = v[CASE] = true; Probe p = probe("\nx");
+  Scanner s = {0}; assert(push(&s, BODY, 0) && push(&s, FUNCTION_MATCH, 0)); s.frames[1].first = 4;
+  bool v[ARRAY_LAYOUT + 1] = {0}, all[ARRAY_LAYOUT + 1]; memset(all, 1, sizeof(all));
+  v[FUNCTION_MATCH_END] = v[FUNCTION_CASE] = true; Probe p = probe("\nx");
   assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
-  assert(p.lexer.result_symbol == MATCH_END && !p.end && s.frames[1].kind == MATCH_DONE); round_trip(&s);
-  memset(v, 0, sizeof(v)); v[BODY_END] = v[ROOT_LAYOUT] = true; p = probe("\nx");
+  assert(p.lexer.result_symbol == FUNCTION_MATCH_END && !p.end && s.frames[1].kind == FUNCTION_MATCH_DONE); round_trip(&s);
+  memset(v, 0, sizeof(v)); v[BODY_END] = v[ROOT_LAYOUT] = v[ARRAY_LAYOUT] = true; p = probe("\nx");
   assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
   assert(p.lexer.result_symbol == BODY_END && !p.end && s.frames[0].kind == BODY_DONE); round_trip(&s);
   for (unsigned crlf = 0; crlf < 2; ++crlf) {
     Scanner copy = s; p = probe(crlf ? "\r\n    x" : "\n    x");
     assert(tree_sitter_bend2_external_scanner_scan(&copy, &p.lexer, v));
     assert(p.lexer.result_symbol == ROOT_LAYOUT && p.end == (crlf ? 6 : 5));
-    assert(copy.frames[1].kind == MATCH_DONE_LAYOUT); round_trip(&copy);
+    assert(copy.frames[1].kind == FUNCTION_MATCH_LAYOUT); round_trip(&copy);
     char b[TREE_SITTER_SERIALIZATION_BUFFER_SIZE]; assert(tree_sitter_bend2_external_scanner_serialize(&copy, b) == 17);
     for (unsigned i = 0; i < 3; ++i) {
       memset(v, 0, sizeof(v)); v[i == 0 ? BODY_ENTRY : i == 1 ? BLOCK_START : LAMBDA_START] = true;
@@ -284,13 +285,13 @@ static void completed_owner_tests(void) {
     assert(!push(&copy, PAR_HEADER, 2)); assert(!push(&copy, WRITE, 0));
     p = probe(""); assert(!tree_sitter_bend2_external_scanner_scan(&copy, &p.lexer, all)); round_trip(&copy);
     p = probe("    case B{}"); assert(tree_sitter_bend2_external_scanner_scan(&copy, &p.lexer, all));
-    assert(p.lexer.result_symbol == CASE && copy.case_header && copy.size == 2);
-    assert(copy.frames[0].kind == BODY_DONE && copy.frames[1].kind == MATCH_DONE_LAYOUT); round_trip(&copy);
+    assert(p.lexer.result_symbol == FUNCTION_CASE && copy.case_header && copy.size == 2);
+    assert(copy.frames[0].kind == BODY_DONE && copy.frames[1].kind == FUNCTION_MATCH_LAYOUT); round_trip(&copy);
     p = probe(" B{}"); assert(!tree_sitter_bend2_external_scanner_scan(&copy, &p.lexer, all));
     memset(v, 0, sizeof(v)); v[CASE_HEADER_START] = true; p = probe(" B{}");
     assert(tree_sitter_bend2_external_scanner_scan(&copy, &p.lexer, v));
-    assert(copy.frames[0].kind == BODY && copy.frames[1].kind == MATCH && copy.frames[2].kind == CASE_HEADER); round_trip(&copy);
-    memset(v, 0, sizeof(v)); v[BODY_END] = v[ROOT_LAYOUT] = true;
+    assert(copy.frames[0].kind == BODY && copy.frames[1].kind == FUNCTION_MATCH && copy.frames[2].kind == CASE_HEADER); round_trip(&copy);
+    memset(v, 0, sizeof(v)); v[BODY_END] = v[ROOT_LAYOUT] = v[ARRAY_LAYOUT] = true;
   }
   for (unsigned i = 0; i < 6; ++i) {
     Scanner bad = s, restored = {0}; char b[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
@@ -310,7 +311,47 @@ static void completed_owner_tests(void) {
   }
   puts("Root owner: real LF/CRLF extra, 17-byte completed pair, no duplicate ends/borrowed entries, actual case normal reactivation, fresh headers and malformed snapshots passed.");
 }
+static void pending_completion_tests(void) {
+  Scanner s = {0}; bool v[ARRAY_LAYOUT + 1] = {0}; Probe p;
+  assert(push(&s, BODY, 0) && push(&s, FUNCTION_MATCH, 0)); s.frames[1].first = 4;
+  s.frames[1].kind = FUNCTION_MATCH_DONE; p = probe("case B{}");
+  assert(case_keyword(&s, &p.lexer, 4)); round_trip(&s);
+  v[BODY_END] = true; p = probe("");
+  assert(!tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+  assert(s.size == 2 && s.case_header); round_trip(&s);
+  for (unsigned i = 0; i <= ARRAY_LAYOUT; ++i) v[i] = true;
+  p = probe(""); assert(!tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+  assert(s.size == 2 && s.case_header); round_trip(&s);
+  memset(v, 0, sizeof(v)); v[CASE_HEADER_START] = true; p = probe(" B{}");
+  assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+  assert(s.size == 3 && !s.case_header && s.frames[1].kind == FUNCTION_MATCH); round_trip(&s);
+  puts("Pending real case: neither a foreign normal caller end nor all-valid EOF can retire its checkpoint; the normal case-header checkpoint remains reachable.");
+}
+static void nested_completed_tests(void) {
+  Scanner s = {0}; bool v[ARRAY_LAYOUT + 1] = {0}; Probe p;
+  assert(push(&s, BODY, 0) && push(&s, FUNCTION_MATCH, 0)); s.frames[1].first = 4;
+  assert(push(&s, CASE_ARM, 5) && push(&s, ARM_MATCH, 5)); s.frames[3].first = 8;
+  const enum Token ends[] = {ARM_MATCH_END, ARM_END, FUNCTION_MATCH_END, BODY_END};
+  for (unsigned i = 0; i < 4; ++i) {
+    memset(v, 0, sizeof(v)); v[ends[i]] = true; v[ROOT_LAYOUT] = v[ARRAY_LAYOUT] = true;
+    p = probe("\n2"); assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+    assert(p.lexer.result_symbol == ends[i] && s.size == 4); round_trip(&s);
+  }
+  assert(s.frames[0].kind == BODY_DONE && s.frames[2].kind == ARM_DONE);
+  memset(v, 0, sizeof(v)); v[ROOT_LAYOUT] = true; p = probe("\r\n2");
+  assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v) && p.end == 2); round_trip(&s);
+  memset(v, 0, sizeof(v)); v[ARM_CASE] = true; p = probe("\n        case B{}");
+  assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+  assert(p.lexer.result_symbol == ARM_CASE && s.case_header && s.size == 4); round_trip(&s);
+  memset(v, 0, sizeof(v)); v[CASE_HEADER_START] = true; p = probe(" B{}");
+  assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+  assert(s.frames[0].kind == BODY && s.frames[1].kind == FUNCTION_MATCH
+    && s.frames[2].kind == CASE_ARM && s.frames[3].kind == ARM_MATCH && s.size == 5); round_trip(&s);
+  puts("Nested completion: four real ends retain the actual ancestor chain; only root layout progresses; a real inner case reactivates all actual ancestors.");
+}
 int main(void) {
+  pending_completion_tests();
+  nested_completed_tests();
   completed_owner_tests();
   terminal_body_tests();
   arm_phase_tests();
@@ -350,10 +391,10 @@ int main(void) {
     assert(push(&s, CASE_HEADER, 7) && push(&s, BLOCK, 9));
     round_trip(&s);
   }
-  char invalid[] = {1, 3, 1, MATCH_DONE_LAYOUT + 1, 0, 0, 0, 0};
+  char invalid[] = {1, 3, 1, LAMBDA_MATCH_LAYOUT + 1, 0, 0, 0, 0};
   tree_sitter_bend2_external_scanner_deserialize(&s, invalid, sizeof(invalid));
   assert(!s.size && !s.declaration_name && !s.decorator_name && !s.closed_string);
-  invalid[0] = 0; invalid[1] = 16;
+  invalid[0] = 0; invalid[1] = 32;
   tree_sitter_bend2_external_scanner_deserialize(&s, invalid, 3);
   assert(!s.size && !s.declaration_name && !s.decorator_name && !s.closed_string);
   puts("Scanner: deep stacks, all frame kinds/flags, full-width columns, bounded serialization and truncated states passed.");
