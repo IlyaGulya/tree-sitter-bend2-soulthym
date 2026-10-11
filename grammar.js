@@ -29,7 +29,9 @@ export default grammar({
     $._pattern_separator, $._successor_natural, $._zero_natural, $._natural_plus, $._amp, $._natural_successor_end, $.module_alias,
     $._body_entry, $._array_type_end, $._continuation_entry, $._header_checkpoint, $._case_pattern_end, $._case_header_start, $._root_layout, $._arm_end, $._block_end, $._lambda_end, $._group_start, $._group_end, $._function_match_start, $._function_match_end, $._function_case_word, $._arm_match_start, $._arm_match_end, $._arm_case_word, $._block_match_start, $._block_match_end, $._block_case_word, $._lambda_match_start, $._lambda_match_end, $._lambda_case_word, $._array_layout,
   ],
-  inline: $ => [$._natural, $._array_terminal_atom],
+  // Keep atomic callers available through infix shifts only in block headers.
+  // Other expression contexts retain their ordinary reductions.
+  inline: $ => [$._header_expression, $._natural, $._array_terminal_atom],
   conflicts: $ => [
     [$._plain_lambda_match, $._owned_lambda_match],
     [$._plain_block_match, $._owned_block_match],
@@ -82,13 +84,21 @@ export default grammar({
     law_definition: $ => seq($._law_header,
       repeat(alias($._law_template_clause, $.law_clause)), repeat($.law_clause),
       field('body', $._block)),
-    _law_template_clause: $ => seq('for', field('quantity', '~'),
-      field('name', $.identifier), ':', field('type', $._expression), optional(seq('where', field('constraint', $._expression)))),
-    law_clause: $ => seq(choice(seq('for', optional(field('quantity', choice('+', '-')))), 'exs'),
-      field('name', $.identifier), ':', field('type', $._expression), optional(seq('where', field('constraint', $._expression)))),
+    // Summarize only consumed clause prefixes. Native recovery can then
+    // finish a nested rewrite and its still-missing enclosing law body.
+    _law_template_header: $ => seq('for', field('quantity', '~'), field('name', $.identifier), ':'),
+    _law_clause_header: $ => seq(choice(seq('for', optional(field('quantity', choice('+', '-')))), 'exs'),
+      field('name', $.identifier), ':'),
+    _law_template_constraint_header: $ => seq($._law_template_header, field('type', $._header_expression), 'where'),
+    _law_constraint_header: $ => seq($._law_clause_header, field('type', $._header_expression), 'where'),
+    _law_template_clause: $ => choice(seq($._law_template_header, field('type', $._header_expression)),
+      seq($._law_template_constraint_header, field('constraint', $._header_expression))),
+    law_clause: $ => choice(seq($._law_clause_header, field('type', $._header_expression)),
+      seq($._law_constraint_header, field('constraint', $._header_expression))),
 
     // Bodies terminate with a value or match; lets own the rest of the body.
-    _block: $ => seq($._block_start, $._body_entry, choice(alias($._block_body, $.body), seq($.body, $._block_end))),
+    _block: $ => seq($._block_start, $._body_entry, $._block_value),
+    _block_value: $ => choice(alias($._block_body, $.body), seq($.body, $._block_end)),
     // Keep entry outside public body nodes so native recovery can retain an
     // intact terminal body without including the rejected prefix in its range.
     _body: $ => seq($._body_entry, $.body),
@@ -244,6 +254,9 @@ export default grammar({
     _pattern_list: $ => seq('[', optional(patternSep1($, $._pattern)), ']'),
     _pattern_cons: $ => prec.right(5, seq(field('left', $._pattern), field('operator', '<>'), field('right', $._pattern))),
 
+    // Same expression syntax and precedence; only its header reductions differ.
+    _header_expression: $ => choice($._atom, alias($._header_binary, $.binary_expression), $.lambda_expression),
+    _header_binary: $ => binary($, $._header_expression, 0),
     _expression: $ => choice($._atom, $.binary_expression, $.lambda_expression),
     _domain_expression: $ => choice($._atom, alias($._domain_binary, $.binary_expression)),
     _generic_argument: $ => choice($._atom, alias($._generic_binary, $.binary_expression)),
@@ -303,8 +316,17 @@ export default grammar({
     equality_expression: $ => seq('{', field('left', $._expression), choice('==', '!='),
       field('right', $._expression), ':', field('type', $._expression), '}'),
     reflexivity: $ => seq('{', '==', '}'),
-    rewrite_expression: $ => prec.right(-2, seq('%', optional(seq(field('name', $.identifier), alias($._at, '@'))),
-      field('proof', $._expression), ':', field('motive', $._expression), optional(';'), field('body', $._block))),
+    // Condense the consumed proof/colon before the motive, as for do headers.
+    // Recovery can then retain the motive's actual atomic caller and arguments.
+    _rewrite_prefix: $ => seq('%', optional(seq(field('name', $.identifier), alias($._at, '@'))),
+      field('proof', $._expression), ':'),
+    // Reduce the consumed motive/separator before the mandatory block, as
+    // for other headers. EOF recovery then compares this actual header owner.
+    _rewrite_header: $ => seq($._rewrite_prefix, field('motive', $._header_expression), optional(';')),
+    // Keep the pre-entry header above: an invalid separator has no block yet.
+    // Once entered, summarize its actual checkpoints before the required value.
+    _rewrite_body_header: $ => seq($._rewrite_header, $._block_start, $._body_entry),
+    rewrite_expression: $ => prec.right(-2, seq($._rewrite_body_header, field('body', $._block_value))),
     eliminator: $ => seq('\\', '{', repeat($.eliminator_arm), optional(seq(field('fallback', $._expression), optional(';'))), '}'),
     eliminator_arm: $ => seq(field('name', $.identifier), ':', field('value', $._expression), optional(';')),
     parenthesized_expression: $ => seq($._group_open, field('body', $.body),

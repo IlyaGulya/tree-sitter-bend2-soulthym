@@ -699,7 +699,9 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     // A genuine declaration name clears prior frames. A live case/layout
     // stack here means recovery rewound to an old header's colon instead.
     if (v[FUNCTION_START] && s->size) return false;
-    if (v[CALL_OPEN] && l->lookahead && strchr("&|*/.<!=", l->lookahead)) return false;
+    // Keep an immediate constructor continuation, as at the body checkpoint.
+    if (v[CALL_OPEN] && l->lookahead
+        && (strchr("&|*/.<!=", l->lookahead) || (!spaced && l->lookahead == '{'))) return false;
     if ((v[PLUS] && l->lookahead == '+') || (v[MINUS] && l->lookahead == '-')) {
       enum Token op = l->lookahead == '+' ? PLUS : MINUS;
       advance(l);
@@ -715,6 +717,13 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
       else if (l->lookahead == '>') { op = SHR; advance(l); }
       if (!v[op]) return false;
       l->mark_end(l); l->result_symbol = op; return true;
+    }
+    // A spaced-right '%' is an enabled infix, not the next rewrite body.
+    if (v[MOD] && l->lookahead == '%') {
+      advance(l);
+      if (space(l->lookahead)) {
+        l->mark_end(l); l->result_symbol = MOD; return true;
+      }
     }
     if (head(l->lookahead)) {
       char word[32]; unsigned n = 0;
