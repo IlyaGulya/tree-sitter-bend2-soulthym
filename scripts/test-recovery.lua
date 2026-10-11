@@ -436,6 +436,48 @@ for _, value in ipairs({ '1n+1n', '42', 'x' }) do
     end
   end
 end
+local caller_prelude = 'type T is Data: A{} B{} C{}\ntype Wrap is Data: Wrap{v:T}\ndef broken(x:Wrap)->U32:\n'
+local inner_match = '  match x:\n    case Wrap{v}:\n      match v:\n        case A{}: '
+for _, spec in ipairs({
+  { 'let terminal match', '  Wrap{v}=x;\n  match v:\n    case A{}: 1n+1n\n2\n    case C{}: 43',
+    '  Wrap{v}=x;\n  match v:\n    case A{}: 1n+1n\n    case C{}: 43', 2 },
+  { 'nested terminal match', inner_match .. '1n+1n\n2\n        case C{}: 43',
+    inner_match .. '1n+1n\n        case C{}: 43', 6 },
+  { 'incomplete nested lambda', inner_match .. 'z => a=vv\n        case C{}: 43',
+    inner_match .. 'z => a=v;v\n        case C{}: 43', 6,
+    { 'lambda_expression', 'z => a=vv', { parameter = 'z' } } },
+  { 'incomplete nested writer group', inner_match .. 'a[0]<(-v;v\n        case B{}: 42\n        case C{}: 43',
+    inner_match .. 'a[0]<-v;v\n        case B{}: 42\n        case C{}: 43', 6 },
+  { 'attached successor erasure', '  match x:\n    case A{}:1n+x~\n    case B{}:42',
+    '  match x:\n    case A{}:1n+x\n    case B{}:42', 2 },
+}) do
+  review_case('fifth review ' .. spec[1], caller_prelude .. spec[2], caller_prelude .. spec[3],
+    { prefix = '', suffix = '\ndef after()->U32:42\n', retained_integer_function = 'def after()->U32:42',
+      following_cases = spec[1] == 'attached successor erasure' and { ['B{}'] = '42' } or { ['C{}'] = '43' },
+      arm_owner_column = spec[4], retained_construct = spec[5] })
+end
+for _, spec in ipairs({
+  { 'array dependent skipped header', caller_prelude .. inner_match .. '[v:@a:Type->(a=)^2n]\n        case C{}: 43\n    case w: 0',
+    caller_prelude .. inner_match .. '[v:@a:Type->(a)^2n]\n        case C{}: 43\n    case w: 0' },
+  { 'law parallel skipped header', 'law broken:\n  for v:T\n  a b=(v v;a', 'law broken:\n  for v:T\n  a b=v v;a' },
+  { 'array owned type damage', 'def broken(x:T)->U32: [x:K=ind(Type)^2n]',
+    'def broken(x:T)->U32: [x:Kind(Type)^2n]',
+    { 'array_expression', '[x:K=ind(Type)^2n]', { value = 'x', size = '2n' }, { '[', '^', ']' } } },
+  { 'annotated group owned let', 'def broken(v:T)->U32: (\n2\na=v;v:T)',
+    'def broken(v:T)->U32: (\na=v;v:T)',
+    { 'parenthesized_expression', '(\n2\na=v;v:T)', { body = 'a=v;v', type = 'T' }, { '(', ')' } } },
+}) do
+  review_case('fifth review ' .. spec[1], spec[2], spec[3],
+    { prefix = '', suffix = '\ndef after()->U32:42\n', retained_integer_function = 'def after()->U32:42',
+      retained_construct = spec[4] })
+end
+for _, ending in ipairs({ 'ordinary', 'decorated', 'EOF' }) do
+  local before = 'def before(a: Array<U32>) -> Array<U32>:\n  a[0] <- 42'
+  review_case('terminal write root mask ' .. ending, '$', '',
+    { prefix = before .. '\n', preceding_function = before,
+      suffix = ending == 'EOF' and '\n' or (ending == 'decorated' and '\n@unsafe' .. definition_first or definition_first),
+      orphan_eof = ending == 'EOF' })
+end
 for _, successor in ipairs({ '1n+n', '0n+n' }) do
   for _, orphan in ipairs({ 'oops', '2', 'x y', '"hi"', "'a'" }) do
     for _, ending in ipairs({ 'ordinary', 'decorated', 'EOF' }) do
@@ -856,6 +898,39 @@ local function check_following_cases(node, text, label, expected, owner_column)
     end
   end
 end
+local function check_retained_construct(node, text, label, spec)
+  local kind, fragment, fields, delimiters = unpack(spec)
+  if text:find('\r\n', 1, true) then fragment = fragment:gsub('\n', '\r\n') end
+  local first, last = source_range(text, fragment)
+  local owner
+  local function find(n)
+    if n:type() == kind and select(3, n:start()) == first - 1 and select(3, n:end_()) == last then owner = n end
+    for child in n:iter_children() do find(child) end
+  end
+  find(node)
+  assert(owner, label .. ': lost retained ' .. kind)
+  local def = owner
+  while def and def:type() ~= 'function_definition' do def = def:parent() end
+  assert(def and vim.treesitter.get_node_text(def:field('name')[1], text) == 'broken', label .. ': wrong construct owner')
+  for _, field in ipairs({ 'name', 'parameters', 'return_type', 'body' }) do
+    local parts = def:field(field)
+    assert(#parts == 1 and (field == 'body' or not parts[1]:has_error()), label .. ': damaged intact header ' .. field)
+  end
+  for field, value in pairs(fields) do
+    local parts = owner:field(field)
+    local a, b = source_range(text, value, first)
+    assert(#parts == 1 and not parts[1]:has_error(), label .. ': damaged retained field ' .. field)
+    check_range(parts[1], text, a, b, label .. ' retained ' .. field)
+  end
+  for _, delimiter in ipairs(delimiters or {}) do
+    local a = source_range(text, delimiter, first)
+    local found = false
+    for child in owner:iter_children() do
+      found = found or (child:type() == delimiter and not child:missing() and select(3, child:start()) == a - 1)
+    end
+    assert(found, label .. ': lost real retained delimiter ' .. delimiter)
+  end
+end
 local function check_delimiter_owner(node, text, label, kind, expression, inner_closer)
   local first, last = source_range(text, expression)
   local owner
@@ -1120,6 +1195,7 @@ for _, case in ipairs(cases) do
         end
         errors(node)
       end
+      if case.retained_construct then check_retained_construct(node, broken, label, case.retained_construct) end
       if case.delimiter then
         local expression = case.delimiter.broken
         if case.crlf then expression = expression:gsub('\n', '\r\n') end
@@ -1131,7 +1207,7 @@ for _, case in ipairs(cases) do
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(fixed:sub(1, -2), '\n', { plain = true }))
     local parser = vim.treesitter.get_parser(buf, 'bend2')
     parser:parse()
-    for _ = 1, 2 do
+    for _ = 1, 3 do
       edit(buf, fixed, broken)
       local damaged = parser:parse()[1]:root()
       check_damaged(damaged, case[1] .. ' (incremental)')

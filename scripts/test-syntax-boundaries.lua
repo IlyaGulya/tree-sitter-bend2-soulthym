@@ -463,6 +463,28 @@ for _, atom in ipairs({ '@a: Type -> a', '1n+x' }) do
     end }
 end
 
+for _, spec in ipairs({
+  { 'law lambda clause operator', 'law boundary:\n  for t:x=>x\n  U32',
+    'law boundary:\n  for t:(x=>x)\n  U32', 'law_clause', 'type' },
+  { 'rewrite lambda motive operator', 'def boundary(x:T)->U32: %e:x=>x;x',
+    'def boundary(x:T)->U32: %e:(x=>x);x', 'rewrite_expression', 'motive' },
+}) do
+  positives[#positives + 1] = { spec[1], source(spec[2]), function(tree, text)
+    local query = vim.treesitter.query.parse('bend2', '(' .. spec[4] .. ' ' .. spec[5] .. ': (lambda_expression) @lambda)')
+    local values = {}
+    for _, n in query:iter_captures(tree, text, 0, -1) do
+      assert(vim.treesitter.get_node_text(n:field('parameter')[1], text) == 'x', 'lost lambda parameter')
+      values[#values + 1] = vim.treesitter.get_node_text(n, text)
+    end
+    assert(vim.deep_equal(values, { 'x=>x' }), 'lambda operator stolen by block entry')
+  end, source(spec[3]) }
+end
+negatives[#negatives + 1] = { 'law trailing successor operand operator',
+  source('type T<q> is Data: K{}\nlaw boundary:\n  for v:1n+v+\n  T'),
+  source('type T<q> is Data: K{}\nlaw boundary:\n  for v:1n+v\n  T') }
+positives[#positives + 1] = { 'law reusable next-line body remains separate',
+  source('type T<q> is Data: K{}\nlaw boundary:\n  for v:1n+v\n  +T') }
+
 local suffix = '\ntype SyntaxAfter is Data: SyntaxAfter{}\n'
   .. 'law syntax_after_law: U32\ndef syntax_after() -> U32: 42\n'
 local function check_following(node, text, label)

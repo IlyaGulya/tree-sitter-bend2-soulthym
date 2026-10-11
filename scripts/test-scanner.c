@@ -223,7 +223,7 @@ static void ownership_tests(void) {
   puts("Ownership: fresh keyword/name checkpoint, initial/continuation semicolons, normal-only case frames, closed patterns, interrupted PAR owners and validated pending payloads passed.");
 }
 static void terminal_body_tests(void) {
-  bool v[ROOT_LAYOUT + 1] = {0}; v[BODY_END] = true;
+  bool v[ROOT_LAYOUT + 1] = {0}; v[BODY_END] = v[ROOT_LAYOUT] = true;
   Scanner s = {0}; assert(push(&s, BODY, 0)); Probe p = probe("$");
   assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
   assert(p.lexer.result_symbol == BODY_END && !s.size && !p.end); round_trip(&s);
