@@ -478,6 +478,19 @@ for _, ending in ipairs({ 'ordinary', 'decorated', 'EOF' }) do
       suffix = ending == 'EOF' and '\n' or (ending == 'decorated' and '\n@unsafe' .. definition_first or definition_first),
       orphan_eof = ending == 'EOF' })
 end
+for _, depth in ipairs({ 5, 10 }) do
+  local source = 'type W is Data: W{v:W} C{}\ndef broken(x:W)->Nat:\n'
+  for level = 1, depth do
+    local column = 2 + 6 * (level - 1)
+    source = source .. (' '):rep(column) .. 'match ' .. (level == 1 and 'x' or ('v' .. (level - 2))) .. ':\n'
+      .. (' '):rep(column + 2) .. 'case W{v' .. (level - 1) .. '}:\n'
+  end
+  source = source .. (' '):rep(2 + 6 * depth) .. '1n+1n\n'
+  local tail = (' '):rep(4 + 6 * (depth - 1)) .. 'case C{}: 0n'
+  review_case('nested transfer depth ' .. depth, source .. '2\n' .. tail, source .. tail,
+    { prefix = '', suffix = '\ndef after()->U32:42\n', retained_integer_function = 'def after()->U32:42',
+      following_cases = { ['C{}'] = '0n' }, arm_owner_column = 2 + 6 * (depth - 1) })
+end
 for _, terminal in ipairs({
   { 'String', 'U32', '"s"', 'string', { { 'string', '"s"', 0 } } },
   { 'Nat', 'Nat', '0n+x', 'natural_successor', { { 'number', '0n', 0 }, { 'operator', '+', 2 }, { 'variable', 'x', 3 } } },
