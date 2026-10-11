@@ -353,6 +353,39 @@ for _, pattern in ipairs({
     { prefix = '', suffix = '\ndef after(): 42\n', retained_integer_function = 'def after(): 42',
       following_cases = { y = '42', z = '43' }, arm_owner_column = 2, owned = true })
 end
+-- Final review: preserve fresh headers and real sibling owners after damage.
+local typed_review_header = 'def broken(x: T) -> T: '
+local law_review_header = 'law broken: U32\nlaw after: U32\ndef broken(): '
+for _, spec in ipairs({
+  { 'nested array missing size', typed_review_header, '[x:[x:T 2n]^2n]', '[x:[x:T^2n]^2n]' },
+  { 'zero successor unfinished rewrite', typed_review_header, '[0n+%,x]', '[0n+%e:T;x,x]' },
+  { 'nonzero successor unfinished rewrite', typed_review_header, '[1n+%,x]', '[1n+%e:T;x,x]' },
+  { 'let missing group closer', typed_review_header, 'x=x;(x', 'x=x;(x)' },
+  { 'parallel missing value group', typed_review_header, 'x y=x( x;x', 'x y=x x;x' },
+  { 'rewrite unfinished let', typed_review_header, '%e:T;x=', '%e:T;x=x;x' },
+  { 'law rewrite unfinished header', law_review_header, '[%e:T;x x]', '[%e:T;x]' },
+  { 'law let array missing size', law_review_header, 'a = [x: U32 2n]; a', 'a = [x: U32 * 2n]; a' },
+  { 'law parallel damaged annotation', law_review_header, 'a b = (x: T$ x; a', 'a b = (x: T) x; a' },
+  { 'law parallel missing eliminator closer', law_review_header, 'a b = \\{x: x; y x; a', 'a b = \\{x: x; y} x; a' },
+  { 'law eliminator lambda unfinished header', law_review_header, '\\{x: x => x x}', '\\{x: x => x}' },
+  { 'law rewrite array unfinished header', law_review_header, '[%x: T; x T ^ 2]', '[%x: T; x]' },
+}) do
+  review_case('third review ' .. spec[1], spec[2] .. spec[3], spec[2] .. spec[4],
+    { prefix = '', suffix = '\ndef after() -> U32: 42\n', retained_integer_function = 'def after() -> U32: 42' })
+end
+local match_review_header = 'type T is Data: A{} B{} C{}\ndef broken(x: T) -> U32:\n  match x:\n    case '
+local match_review_tail = '\n    case B{}: 42\n    case C{}: 43'
+for _, spec in ipairs({
+  { 'damaged closed kind array', 'A{}: [x:K$ind(Type)^2n]', 'A{}: [x:Kind(Type)^2n]' },
+  { 'missing successor operator', 'A{}: 1n+1n$x', 'A{}: 1n+1n+x' },
+  { 'leading case body semicolon', 'A{}: ;[x:T^2n]', 'A{}: [x:T^2n]' },
+  { 'replaced case colon before natural', 'A{}) 0n', 'A{}: 0n' },
+}) do
+  review_case('third review ' .. spec[1], match_review_header .. spec[2] .. match_review_tail,
+    match_review_header .. spec[3] .. match_review_tail,
+    { prefix = '', suffix = '\ndef after() -> U32: 42\n', retained_integer_function = 'def after() -> U32: 42',
+      following_cases = { ['B{}'] = '42', ['C{}'] = '43' }, arm_owner_column = 2 })
+end
 for _, successor in ipairs({ '1n+n', '0n+n' }) do
   for _, orphan in ipairs({ 'oops', '2', 'x y', '"hi"', "'a'" }) do
     for _, ending in ipairs({ 'ordinary', 'decorated', 'EOF' }) do
