@@ -300,6 +300,45 @@ for _, terminal in ipairs({ '"s"', 'Type' }) do
     start .. 'x = y = x x\n  ' .. terminal, start .. 'x = y; x = x\n  ' .. terminal,
     { prefix = '', suffix = '\ndef after(): 42\n', retained_integer_function = 'def after(): 42', owned = true })
 end
+-- Body-entry ownership must work for every lexical term family, not only numbers.
+for _, term in ipairs({
+  { '"s"', 'string', { { 'string', '"s"', 0 } } },
+  { '"first\\nlast"', 'string', { { 'string', '"first\\nlast"', 0 } } },
+  { '"first\n  last"', 'string', { { 'string', '"first\n  last"', 0 } } },
+  { "'a'", 'character', { { 'character', "'a'", 0 } } },
+  { '1.5', 'float', { { 'number.float', '1.5', 0 } } },
+  { '0n', 'natural', { { 'number', '0n', 0 } } },
+  { '1n+x', 'natural_successor', { { 'number', '1n', 0 } } },
+  { 'Type', 'builtin_type', { { 'type.builtin', 'Type', 0 } } },
+  { 'Data', 'builtin_type', { { 'type.builtin', 'Data', 0 } } },
+  { 'Quant', 'builtin_type', { { 'type.builtin', 'Quant', 0 } } },
+  { 'Kind(Type)', 'kind_expression', { { 'type.builtin', 'Kind', 0 }, { 'type.builtin', 'Type', 0 } } },
+  { '(x)', 'parenthesized_expression', { { 'variable', 'x', 0 } } },
+  { '(x, x)', 'tuple_expression', { { 'variable', 'x', 0 } } },
+  { 'g(x)', 'call_expression', { { 'function.call', 'g', 0 } } },
+  { '[x, x]', 'list_expression', { { 'variable', 'x', 0 } } },
+  { 'z => z', 'lambda_expression', { { 'variable.parameter', 'z', 0 } } },
+  { '&2', 'quantity', { { 'constant.builtin', '&2', 0 } } },
+  { '\\{x}', 'eliminator', { { 'variable', 'x', 0 } } },
+  { '+x', 'reusable_expression', { { 'operator', '+', 0 } } },
+  { 'g!(x)', 'call_expression', { { 'function.call', 'g', 0 }, { 'keyword.modifier', '!', 0 } } },
+  { '[x : U32 ^ 2]', 'array_expression', { { 'number', '2', 11 } } },
+}) do
+  for _, nested in ipairs({ false, true }) do
+    local start = 'def broken(x:T) -> U32:\n' .. (nested and '  match x:\n    case B{}:\n      ' or '  ')
+    local indentation = nested and '\n      ' or '\n  '
+    local terminal = term[1]:gsub('\n', indentation)
+    local captures = vim.deepcopy(term[3])
+    for _, capture in ipairs(captures) do capture[2] = capture[2]:gsub('\n', indentation) end
+    local separator = term[1] == '&2' and ';' or ''
+    local finish = nested and '\n    case C{}: 43' or ''
+    review_case('body entry ' .. (nested and 'nested ' or '') .. term[2] .. ' ' .. term[1],
+      start .. 'x=y=x x' .. separator .. indentation .. terminal .. finish,
+      start .. 'x y=x x' .. separator .. indentation .. terminal .. finish,
+      { owned = true, terminal_expression = { terminal, term[2], captures }, damaged_line = 'x=y=x x',
+        following_cases = nested and { ['C{}'] = '43' } or nil, arm_owner_column = 2 })
+  end
+end
 for _, pattern in ipairs({
   { 'incomplete annotation', '(x:)', '(x: T)' },
   { 'successor tuple closer', '[1n+(x,y]', '[1n+(x,y)]' },
@@ -955,6 +994,47 @@ for _, case in ipairs(cases) do
           check_capture(structure_queries[file].query, def, broken, structure_queries[file].capture,
             first, last, label .. ' edited ' .. file)
         end
+      end
+      if case.terminal_expression then
+        local fragment, kind, captures = unpack(case.terminal_expression)
+        if case.crlf then fragment = fragment:gsub('\n', '\r\n') end
+        local function terminal(tree, source)
+          local def
+          for child in tree:iter_children() do
+            local name = child:field('name')[1]
+            if name and vim.treesitter.get_node_text(name, source) == 'broken' then def = child end
+          end
+          assert(def, label .. ': edited function missing')
+          local first, last = source_range(source, fragment, select(3, def:field('body')[1]:start()) + 1)
+          local found
+          local function find(n)
+            if n:type() == kind and select(3, n:start()) == first - 1 and select(3, n:end_()) == last then found = n end
+            for child in n:iter_children() do find(child) end
+          end
+          find(def)
+          assert(found and not found:has_error(), label .. ': intact terminal absent or damaged')
+          local body = found:parent()
+          assert(body and body:type() == 'body' and not body:has_error(), label .. ': terminal clean body lost')
+          check_range(body, source, first, last, label .. ' terminal body')
+          for _, capture in ipairs(captures) do
+            local text = capture[2]
+            if case.crlf then text = text:gsub('\n', '\r\n') end
+            local a, b = source_range(source, text, first + capture[3])
+            check_capture(highlights, def, source, capture[1], a, b, label .. ' terminal highlight')
+          end
+          return found
+        end
+        assert(vim.deep_equal(signature(terminal(node, broken)), signature(terminal(expected, fixed))),
+          label .. ': terminal fields/delimiter owners changed')
+        local first, last = source_range(broken, case.damaged_line)
+        local function errors(n)
+          if n:type() == 'ERROR' or n:missing() then
+            assert(select(3, n:start()) >= first - 1 and select(3, n:end_()) <= last,
+              label .. ': error crosses terminal or intact header')
+          end
+          for child in n:iter_children() do errors(child) end
+        end
+        errors(node)
       end
       if case.delimiter then
         local expression = case.delimiter.broken
