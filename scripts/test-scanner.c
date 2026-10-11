@@ -373,7 +373,7 @@ static void block_entry_tests(void) {
 static void block_operator_tests(void) {
   const struct { const char *text; enum Token token; unsigned end; } cases[] = {
     {" +1", PLUS, 2}, {" -1", MINUS, 2}, {" > 1", GT, 2},
-    {" >= 1", GE, 3}, {" >> 1", SHR, 3},
+    {" >= 1", GE, 3}, {" >> 1", SHR, 3}, {"% y", MOD, 1},
   };
   for (unsigned i = 0; i < sizeof(cases)/sizeof(*cases); ++i) {
     Scanner s = {0}; bool v[ARRAY_LAYOUT + 1] = {0}; v[BLOCK_START] = v[cases[i].token] = true;
@@ -389,6 +389,12 @@ static void block_operator_tests(void) {
   Scanner s = {0}; bool v[ARRAY_LAYOUT + 1] = {0}; v[BLOCK_START] = v[PLUS] = true;
   Probe p = probe(" +x"); assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
   assert(p.lexer.result_symbol == BLOCK_START && !p.end && s.size == 1 && s.frames[0].kind == BLOCK); round_trip(&s);
+  memset(v, 0, sizeof(v)); v[BLOCK_START] = v[MOD] = true;
+  s = (Scanner){0}; p = probe("%e:T;0");
+  assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+  assert(p.lexer.result_symbol == BLOCK_START && !p.end && s.size == 1); round_trip(&s);
+  memset(v, 1, sizeof(v)); s = (Scanner){0}; p = probe("% y");
+  assert(!tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v) && !s.size); round_trip(&s);
   puts("Block operators: enabled arithmetic/comparisons retain their operands without allocating a body; glued reusable names still enter it.");
 }
 int main(void) {
@@ -442,4 +448,5 @@ int main(void) {
   tree_sitter_bend2_external_scanner_deserialize(&s, invalid, 3);
   assert(!s.size && !s.declaration_name && !s.decorator_name && !s.closed_string);
   puts("Scanner: deep stacks, all frame kinds/flags, full-width columns, bounded serialization and truncated states passed.");
+  return 0;
 }

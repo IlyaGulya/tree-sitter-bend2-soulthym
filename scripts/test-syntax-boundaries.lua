@@ -479,7 +479,7 @@ for _, spec in ipairs({
     assert(vim.deep_equal(values, { 'x=>x' }), 'lambda operator stolen by block entry')
   end, source(spec[3]) }
 end
-for _, operand in ipairs({ 'x+1', 'x > 1' }) do
+for _, operand in ipairs({ 'x+1', 'x > 1', 'x% y' }) do
   positives[#positives + 1] = { 'law constraint owns full operand ' .. operand,
     source('law boundary:\n  for t:Type where 1n+' .. operand .. '\n  U32'), function(tree, text)
       local query = vim.treesitter.query.parse('bend2', '(law_clause constraint: (natural_successor value: (_) @operand))')
@@ -488,6 +488,26 @@ for _, operand in ipairs({ 'x+1', 'x > 1' }) do
       assert(vim.deep_equal(values, { operand }), 'constraint operator or operand stolen by block entry')
     end, source('law boundary:\n  for t:Type where (1n+' .. operand .. ')\n  U32') }
 end
+for _, spec in ipairs({
+  { 'MOD proof field', 'def boundary()->T:%x% y:T;0', 'proof' },
+  { 'MOD motive field', 'def boundary()->T:%e:x% y;0', 'motive' },
+}) do
+  positives[#positives + 1] = { spec[1], source(spec[2]), function(tree, text)
+    local q = vim.treesitter.query.parse('bend2', '(rewrite_expression ' .. spec[3] .. ': (binary_expression) @operand)')
+    local values = {}
+    for _, n in q:iter_captures(tree, text, 0, -1) do values[#values + 1] = vim.treesitter.get_node_text(n, text) end
+    assert(vim.deep_equal(values, { 'x% y' }), 'MOD operator stolen from ' .. spec[3])
+  end, source(spec[2]:gsub('x%% y', 'x& y')) }
+end
+-- Arithmetic is syntax even when Bend later requests an operator annotation.
+positives[#positives + 1] = { 'annotated full MOD constraint operand',
+  source('law boundary: for v:Type where (1n+x% y : Nat)\nT'), function(tree, text)
+    local query = vim.treesitter.query.parse('bend2',
+      '(law_clause constraint: (parenthesized_expression body: (body (natural_successor value: (binary_expression) @operand))))')
+    local values = {}
+    for _, n in query:iter_captures(tree, text, 0, -1) do values[#values + 1] = vim.treesitter.get_node_text(n, text) end
+    assert(vim.deep_equal(values, { 'x% y' }), 'full MOD constraint operand truncated')
+  end, source('law boundary: for v:Type where (1n+x& y : Nat)\nT') }
 negatives[#negatives + 1] = { 'law trailing successor operand operator',
   source('type T<q> is Data: K{}\nlaw boundary:\n  for v:1n+v+\n  T'),
   source('type T<q> is Data: K{}\nlaw boundary:\n  for v:1n+v\n  T') }
@@ -573,7 +593,7 @@ for _, spec in ipairs({
       end
     end
     assert(vim.deep_equal(values, { callee = 'g', gpu = '!(', arguments = '!(x)' }), 'GPU call/delimiter ownership lost')
-  end }
+  end, cycles = 3 }
 end
 
 local suffix = '\ntype SyntaxAfter is Data: SyntaxAfter{}\n'
