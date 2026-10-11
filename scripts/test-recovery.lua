@@ -279,11 +279,11 @@ end
 review_case('design damaged lambda successor before fresh header',
   'def broken() -> Nat -> Nat:\n  $x => 1n+x',
   'def broken() -> Nat -> Nat:\n  x => 1n+x',
-  { prefix = '', suffix = '\ndef after(): 42\n', retained_integer_function = 'def after(): 42' })
+  { prefix = '', suffix = '\ndef after(): 42\n', retained_integer_function = 'def after(): 42', owned = true })
 review_case('design malformed array with intact string before fresh header',
   'def broken(x: T):\n  [a : U32 = x\n  "s"',
   'def broken(x: T):\n  [a : U32 * x]',
-  { prefix = '', suffix = '\ndef after(): 42\n', retained_integer_function = 'def after(): 42' })
+  { prefix = '', suffix = '\ndef after(): 42\n', retained_integer_function = 'def after(): 42', owned = true })
 for _, damage in ipairs({
   { 'array natural tail', 'def broken(x: T):\n  [a : U32 = x\n  0n+x', 'def broken(x: T):\n  [a : U32 * x]' },
   { 'array literal tail', 'def broken(x: T):\n  [a : U32 = x\n  0n', 'def broken(x: T):\n  [a : U32 * x]' },
@@ -292,6 +292,12 @@ for _, damage in ipairs({
     'def broken(x: Nat, y: Nat) -> Nat:\n  x = y; x = x\n  0' },
 }) do
   review_case('structural ' .. damage[1], damage[2], damage[3],
+    { prefix = '', suffix = '\ndef after(): 42\n', retained_integer_function = 'def after(): 42', owned = true })
+end
+for _, terminal in ipairs({ '"s"', 'Type' }) do
+  local start = 'def broken(x: T, y: T) -> T:\n  '
+  review_case('structural extra assignment terminal ' .. terminal,
+    start .. 'x = y = x x\n  ' .. terminal, start .. 'x = y; x = x\n  ' .. terminal,
     { prefix = '', suffix = '\ndef after(): 42\n', retained_integer_function = 'def after(): 42', owned = true })
 end
 for _, pattern in ipairs({
@@ -334,8 +340,8 @@ local function parse(text)
   return vim.treesitter.get_string_parser(text, 'bend2'):parse()[1]:root()
 end
 local function signature(node)
-  local result = { node:type(), node:range() }
-  for child in node:iter_children() do result[#result + 1] = signature(child) end
+  local result = { node:type(), { node:range() }, node:missing() }
+  for child, field in node:iter_children() do result[#result + 1] = { field or '', signature(child) } end
   return result
 end
 local function position(text, offset)
@@ -721,7 +727,9 @@ local function check_following_cases(node, text, label, expected, owner_column)
       indents = { { 'indent.align', pattern_start, pattern_start + #pattern - 1 } },
     }) do
       for _, spec in ipairs(captures) do
-        check_capture(structure_queries[file].query, arm, text, spec[1], spec[2], spec[3], label .. ' following arm ' .. file)
+        if file ~= 'indents' or pattern:sub(-2) == '{}' then
+          check_capture(structure_queries[file].query, arm, text, spec[1], spec[2], spec[3], label .. ' following arm ' .. file)
+        end
       end
     end
   end
@@ -939,7 +947,11 @@ for _, case in ipairs(cases) do
         end
         local body = def:field('body')[1]
         assert(body, label .. ': edited body detached')
-        for _, file in ipairs({ 'folds', 'context', 'textobjects', 'locals', 'indents' }) do
+        local body_start = assert(source:find('\n', 1, true)) + 1
+        while source:sub(body_start, body_start):match('%s') do body_start = body_start + 1 end
+        assert(select(3, body:start()) >= first + body_start - 2
+          and select(3, body:end_()) == last, label .. ': edited body crosses intact boundaries')
+        for _, file in ipairs({ 'folds', 'tags', 'context', 'textobjects', 'locals', 'indents' }) do
           check_capture(structure_queries[file].query, def, broken, structure_queries[file].capture,
             first, last, label .. ' edited ' .. file)
         end
