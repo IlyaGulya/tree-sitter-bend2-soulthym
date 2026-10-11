@@ -349,6 +349,27 @@ static void nested_completed_tests(void) {
     && s.frames[2].kind == CASE_ARM && s.frames[3].kind == ARM_MATCH && s.size == 5); round_trip(&s);
   puts("Nested completion: four real ends retain the actual ancestor chain; only root layout progresses; a real inner case reactivates all actual ancestors.");
 }
+static void block_entry_tests(void) {
+  bool v[ARRAY_LAYOUT + 1] = {0}; v[BODY_ENTRY] = v[ROOT_LAYOUT] = v[ARRAY_LAYOUT] = true;
+  const char *starts[] = {"def after", "type After", "law after", "x", "Type"};
+  for (unsigned i = 0; i < sizeof(starts)/sizeof(*starts); ++i) {
+    Scanner s = {0}; assert(push(&s, BLOCK, 0));
+    char before[TREE_SITTER_SERIALIZATION_BUFFER_SIZE], after[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
+    unsigned n = tree_sitter_bend2_external_scanner_serialize(&s, before);
+    Probe p = probe(starts[i]);
+    assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+    assert(p.lexer.result_symbol == BODY_ENTRY && !p.at && !p.end);
+    assert(tree_sitter_bend2_external_scanner_serialize(&s, after) == n && !memcmp(before, after, n));
+    round_trip(&s);
+  }
+  // Neither another caller nor all-valid recovery may borrow this checkpoint.
+  Scanner s = {0}; assert(push(&s, BODY, 0)); Probe p = probe("def after");
+  assert(!tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+  memset(v, 1, sizeof(v)); s = (Scanner){0}; assert(push(&s, BLOCK, 0)); p = probe("$");
+  assert(!tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+  assert(s.size == 1); round_trip(&s);
+  puts("Block entry: normal mandatory checkpoint precedes a missing value; no source consumed, state unchanged, other callers/error-mode inert.");
+}
 static void block_operator_tests(void) {
   const struct { const char *text; enum Token token; unsigned end; } cases[] = {
     {" +1", PLUS, 2}, {" -1", MINUS, 2}, {" > 1", GT, 2},
@@ -371,6 +392,7 @@ static void block_operator_tests(void) {
   puts("Block operators: enabled arithmetic/comparisons retain their operands without allocating a body; glued reusable names still enter it.");
 }
 int main(void) {
+  block_entry_tests();
   block_operator_tests();
   pending_completion_tests();
   nested_completed_tests();

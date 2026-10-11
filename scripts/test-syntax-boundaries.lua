@@ -496,14 +496,66 @@ positives[#positives + 1] = { 'law reusable next-line body remains separate',
 
 negatives[#negatives + 1] = { 'hybrid missing law body retains header',
   source('law boundary: for v:T\n>1'), source('law boundary: for v:T\n1'), function(tree, text)
-    local query = vim.treesitter.query.parse('bend2', '(law_definition name: (identifier) @name (law_clause name: (identifier) @parameter type: (_) @type))')
-    local values = {}
-    for id, n in query:iter_captures(tree, text, 0, -1) do
-      assert(not n:has_error(), 'law recovery corrupts its intact header')
-      values[query.captures[id]] = vim.treesitter.get_node_text(n, text)
+    local law
+    for child in tree:iter_children() do
+      local name = child:field('name')[1]
+      if name and vim.treesitter.get_node_text(name, text) == 'boundary' then law = child end
     end
-    assert(vim.deep_equal(values, { name = 'boundary', parameter = 'v', type = 'T' }), 'edited law header lost')
-  end }
+    local first, last = assert(text:find('law boundary: for v:T\r?\n>1'))
+    local function exact(node, fragment, from)
+      local a, b = assert(text:find(fragment, from or first, true))
+      assert(node and not node:has_error() and select(3, node:start()) == a - 1
+        and select(3, node:end_()) == b, 'law recovery corrupts intact field ' .. fragment)
+    end
+    assert(law and law:has_error() and select(3, law:start()) == first - 1
+      and select(3, law:end_()) == last, 'edited law/header or native error lost')
+    exact(law:field('name')[1], 'boundary')
+    local clause
+    for child in law:iter_children() do if child:type() == 'law_clause' then clause = child end end
+    assert(clause and not clause:has_error(), 'intact law clause lost')
+    exact(clause:field('name')[1], 'v', first + #'law boundary: for ')
+    local term = clause:field('type')[1]
+    -- The operator correctly extends the type; it is the BODY that is missing.
+    assert(term and term:type() == 'binary_expression', 'clause comparison lost')
+    exact(term, text:sub(assert(text:find('T', first, true)), last))
+    exact(term:field('left')[1], 'T')
+    exact(term:field('operator')[1], '>')
+    exact(term:field('right')[1], '1')
+    local body = law:field('body')[1]
+    assert(body and body:has_error() and select(3, body:start()) == last
+      and select(3, body:end_()) == last, 'missing law body borrowed real source')
+    local missing = false
+    local function errors(n)
+      if n:type() == 'ERROR' or n:missing() then
+        assert(select(3, n:start()) == last and select(3, n:end_()) == last,
+          'law error overlaps intact header or next declaration')
+        missing = true
+      end
+      for child in n:iter_children() do errors(child) end
+    end
+    errors(law)
+    assert(missing, 'missing body has no native diagnostic')
+    for file, wanted in pairs({ highlights = { 'function', 'variable.parameter', 'operator', 'number' },
+      tags = { 'definition.function', 'name' }, folds = { 'fold' }, context = { 'context' },
+      textobjects = { 'class.outer' }, locals = { 'local.scope', 'local.definition' }, indents = { 'indent.begin' } }) do
+      local q = vim.treesitter.query.parse('bend2', table.concat(vim.fn.readfile('queries/' .. file .. '.scm'), '\n'))
+      local got = {}
+      for id, n in q:iter_captures(law, text, 0, -1) do
+        got[q.captures[id]] = n
+      end
+      for _, capture in ipairs(wanted) do
+        assert(got[capture], 'lost law recovery capture ' .. file .. ' @' .. capture)
+      end
+      local capture = file == 'highlights' and got['function'] or file == 'tags' and got['name']
+      if capture then exact(capture, 'boundary') end
+      if file ~= 'highlights' and file ~= 'tags' then
+        local n = got[wanted[1]]
+        assert(select(3, n:start()) == first - 1 and select(3, n:end_()) == last,
+          'changed law recovery capture boundary ' .. file)
+      end
+    end
+  end, cycles = 3 }
+
 for _, spec in ipairs({
   { 'law', 'law boundary: for v:g-!(x)\nT', 'law boundary: for v:g!(x)\nT' },
   { 'rewrite', 'def boundary()->T: %e:g-!(x);x', 'def boundary()->T: %e:g!(x);x' },
@@ -669,7 +721,7 @@ for _, newline in ipairs({ { 'LF', '\n' }, { 'CRLF', '\r\n' } }) do
       vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(fixed:sub(1, -2), '\n', { plain = true }))
       local parser = vim.treesitter.get_parser(buf, 'bend2')
       assert(fingerprint(parser:parse()[1]:root()) == fingerprint(expected), label .. ': valid buffer differs from fresh parse')
-      for _ = 1, 2 do
+      for _ = 1, case.cycles or 2 do
         edit(buf, fixed, broken)
         local changed = parser:parse()[1]:root()
         damaged(changed, ' (incremental)')

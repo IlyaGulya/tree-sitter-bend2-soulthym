@@ -616,6 +616,10 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     pop(s); l->result_symbol = t; return true;
   }
   if (s->header_checkpoint || s->case_header) return false;
+  // An entered mandatory block reaches its initial body checkpoint even when
+  // the value is absent. Native recovery can then report the missing term
+  // without discarding the intact header before this block.
+  if (v[BODY_ENTRY] && top && top->kind == BLOCK) return body_entry(s, l, BODY_ENTRY);
   if (v[IMPORT_END]) {
     if (!newline && !l->eof(l)) return false;
     l->result_symbol = IMPORT_END; return true;
