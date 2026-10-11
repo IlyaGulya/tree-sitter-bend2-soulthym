@@ -696,9 +696,21 @@ bool tree_sitter_bend2_external_scanner_scan(void *p, TSLexer *l, const bool *v)
     // stack here means recovery rewound to an old header's colon instead.
     if (v[FUNCTION_START] && s->size) return false;
     if (v[CALL_OPEN] && l->lookahead && strchr("&|*/.<!=", l->lookahead)) return false;
-    if ((v[PLUS] || v[MINUS]) && (l->lookahead == '+' || l->lookahead == '-')) {
+    if ((v[PLUS] && l->lookahead == '+') || (v[MINUS] && l->lookahead == '-')) {
+      enum Token op = l->lookahead == '+' ? PLUS : MINUS;
       advance(l);
-      if (!head(l->lookahead)) return false;
+      if (!head(l->lookahead)) {
+        if (l->lookahead == '>' || (op == PLUS && l->lookahead == '+')) return false;
+        l->mark_end(l); l->result_symbol = op; return true;
+      }
+    }
+    if (spaced && l->lookahead == '>' && (v[GT] || v[GE] || v[SHR])) {
+      advance(l);
+      enum Token op = GT;
+      if (l->lookahead == '=') { op = GE; advance(l); }
+      else if (l->lookahead == '>') { op = SHR; advance(l); }
+      if (!v[op]) return false;
+      l->mark_end(l); l->result_symbol = op; return true;
     }
     if (head(l->lookahead)) {
       char word[32]; unsigned n = 0;

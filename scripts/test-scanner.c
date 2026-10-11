@@ -349,7 +349,29 @@ static void nested_completed_tests(void) {
     && s.frames[2].kind == CASE_ARM && s.frames[3].kind == ARM_MATCH && s.size == 5); round_trip(&s);
   puts("Nested completion: four real ends retain the actual ancestor chain; only root layout progresses; a real inner case reactivates all actual ancestors.");
 }
+static void block_operator_tests(void) {
+  const struct { const char *text; enum Token token; unsigned end; } cases[] = {
+    {" +1", PLUS, 2}, {" -1", MINUS, 2}, {" > 1", GT, 2},
+    {" >= 1", GE, 3}, {" >> 1", SHR, 3},
+  };
+  for (unsigned i = 0; i < sizeof(cases)/sizeof(*cases); ++i) {
+    Scanner s = {0}; bool v[ARRAY_LAYOUT + 1] = {0}; v[BLOCK_START] = v[cases[i].token] = true;
+    Probe p = probe(cases[i].text);
+    assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+    assert(p.lexer.result_symbol == cases[i].token && p.end == cases[i].end && !s.size); round_trip(&s);
+  }
+  for (unsigned i = 0; i < 2; ++i) {
+    Scanner s = {0}; bool v[ARRAY_LAYOUT + 1] = {0}; v[BLOCK_START] = v[PLUS] = true;
+    Probe p = probe(i ? " +>" : " ++");
+    assert(!tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v) && !s.size); round_trip(&s);
+  }
+  Scanner s = {0}; bool v[ARRAY_LAYOUT + 1] = {0}; v[BLOCK_START] = v[PLUS] = true;
+  Probe p = probe(" +x"); assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+  assert(p.lexer.result_symbol == BLOCK_START && !p.end && s.size == 1 && s.frames[0].kind == BLOCK); round_trip(&s);
+  puts("Block operators: enabled arithmetic/comparisons retain their operands without allocating a body; glued reusable names still enter it.");
+}
 int main(void) {
+  block_operator_tests();
   pending_completion_tests();
   nested_completed_tests();
   completed_owner_tests();
