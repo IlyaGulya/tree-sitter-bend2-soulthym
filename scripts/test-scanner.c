@@ -28,7 +28,62 @@ static void round_trip(Scanner *s) {
     assert(restored.size == 0);
   }
 }
+// Mock lexer for grammar-owned, zero-width phase transitions.
+typedef struct { TSLexer lexer; const char *text; unsigned at, end; } Probe;
+static void probe_advance(TSLexer *l, bool skip) {
+  (void)skip; Probe *p = (Probe *)l;
+  if (p->text[p->at]) ++p->at;
+  l->lookahead = p->text[p->at];
+}
+static void probe_mark(TSLexer *l) { Probe *p = (Probe *)l; p->end = p->at; }
+static uint32_t probe_column(TSLexer *l) { return ((Probe *)l)->at; }
+static bool probe_eof(const TSLexer *l) { return !l->lookahead; }
+static Probe probe(const char *text) {
+  return (Probe){.text = text, .lexer = {.lookahead = text[0], .advance = probe_advance,
+    .mark_end = probe_mark, .get_column = probe_column, .eof = probe_eof}};
+}
+static void checkpoint_tests(void) {
+  bool v[BODY_ENTRY + 1] = {0}; v[BODY_ENTRY] = true;
+  for (unsigned phase = PAR; phase <= PAR_HEADER; phase += PAR_HEADER - PAR) {
+    Scanner s = {0}; assert(push(&s, BODY, 0) && push(&s, phase, 2));
+    Probe p = probe("Type");
+    assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+    assert(p.lexer.result_symbol == BODY_ENTRY && p.end == 0 && p.at == 0);
+    assert(s.size == (phase == PAR_HEADER ? 1 : 2));
+    round_trip(&s);
+    for (unsigned i = 0; i < 300; ++i) {
+      p = probe("Type"); assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+      assert(s.size == (phase == PAR_HEADER ? 1 : 2));
+      assert(s.frames[0].kind == BODY && s.frames[0].column == 0 && s.frames[0].first == UINT32_MAX);
+      if (phase == PAR) assert(s.frames[1].kind == PAR && s.frames[1].column == 2 && s.frames[1].first == UINT32_MAX);
+      assert(!s.declaration_name && !s.closed_string && !s.decorator_name);
+      round_trip(&s);
+    }
+  }
+  Scanner s = {0}; assert(push(&s, BODY, 0) && push(&s, PAR_HEADER, 2));
+  v[ERROR_SENTINEL] = true; Probe p = probe("Type");
+  assert(!tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+  assert(s.size == 2 && s.frames[1].kind == PAR_HEADER); round_trip(&s);
+  v[ERROR_SENTINEL] = false;
+  for (unsigned literal = 0; literal < 2; ++literal) {
+    s = (Scanner){0}; assert(push(&s, BODY, 0) && push(&s, PAR_HEADER, 2));
+    p = probe(literal ? "\"s\"" : "Type");
+    assert(tree_sitter_bend2_external_scanner_scan(&s, &p.lexer, v));
+    assert(p.lexer.result_symbol == BODY_ENTRY && p.end == 0 && s.size == 1);
+    char state[TREE_SITTER_SERIALIZATION_BUFFER_SIZE];
+    unsigned bytes = tree_sitter_bend2_external_scanner_serialize(&s, state);
+    Scanner restored = {0}; tree_sitter_bend2_external_scanner_deserialize(&restored, state, bytes);
+    bool terms[BODY_ENTRY + 1] = {0}; terms[WRITE_START] = terms[IDENTIFIER] = terms[STRING_START] = true;
+    p = probe(literal ? "\"s\"" : "Type");
+    bool ok = tree_sitter_bend2_external_scanner_scan(&restored, &p.lexer, terms);
+    assert(ok == (literal != 0));
+    if (ok) assert(p.lexer.result_symbol == STRING_START && p.end == 1);
+    assert(restored.size == 1 && restored.frames[0].kind == BODY); round_trip(&restored);
+  }
+  puts("BODY_ENTRY: zero-width, only stale header retired, actual values retained, error-mode inert, 300 entries bounded, phase persists before string/builtin lexing.");
+}
 int main(void) {
+  checkpoint_tests();
   Scanner s = {0};
   s.declaration_name = s.closed_string = s.decorator_name = true;
   for (unsigned i = 0; i < 200; ++i) {

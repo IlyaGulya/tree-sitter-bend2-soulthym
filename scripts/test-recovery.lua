@@ -982,7 +982,8 @@ for _, case in ipairs(cases) do
         for _, field in ipairs({ 'name', 'parameters', 'return_type' }) do
           local parts = def:field(field)
           for _, part in ipairs(parts) do assert(not part:has_error(), label .. ': damaged intact header ' .. field) end
-          assert(field == 'return_type' or #parts == 1, label .. ': missing intact header ' .. field)
+          local count = field == 'return_type' and not source:match('^def broken%([^\n]*%)%s*%->') and 0 or 1
+          assert(#parts == count, label .. ': missing or duplicated intact header ' .. field)
         end
         local body = def:field('body')[1]
         assert(body, label .. ': edited body detached')

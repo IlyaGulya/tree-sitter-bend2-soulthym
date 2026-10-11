@@ -12,7 +12,10 @@ local function fingerprint(node)
   local out = {}
   local function visit(n)
     out[#out + 1] = n:type() .. ':' .. table.concat({ n:range() }, ',') .. ':' .. tostring(n:missing())
-    for child in n:iter_children() do visit(child) end
+    for child, field in n:iter_children() do
+      out[#out + 1] = field or ''
+      visit(child)
+    end
   end
   visit(node)
   return table.concat(out, '\n')
@@ -380,6 +383,51 @@ for _, spec in ipairs(official) do
   negatives[#negatives + 1] = { 'official ' .. spec[1], text, repaired }
 end
 
+-- Shared pattern prefixes may not finish a full successor operand early.
+for _, spec in ipairs({
+  { '1n+x[0]', '(x[0])', { 'x[0]' } },
+  { '1n+g!(x)', '(g!(x))', { 'g!(x)' } },
+  { '1n+1n+x & x', '(1n+(x & x))', { '1n+x & x', 'x & x' } },
+  { '0n+[x][0]', '([x][0])', { '[x][0]' } },
+}) do
+  local function book(term) return source('def boundary(x: Nat) -> Nat: ' .. term) end
+  positives[#positives + 1] = { 'full successor operand ' .. spec[1], book(spec[1]), function(tree, text)
+    local values = {}
+    local query = vim.treesitter.query.parse('bend2', '(natural_successor value: (_) @value)')
+    for _, n in query:iter_captures(tree, text, 0, -1) do values[#values + 1] = vim.treesitter.get_node_text(n, text) end
+    assert(vim.deep_equal(values, spec[3]), 'changed successor operand fields/ranges')
+    if spec[1]:find('g!', 1, true) then
+      for file, capture in pairs({ highlights = 'function.call', tags = 'name', textobjects = 'call.outer' }) do
+        local q = vim.treesitter.query.parse('bend2', table.concat(vim.fn.readfile('queries/' .. file .. '.scm'), '\n'))
+        local found = false
+        for id, n in q:iter_captures(tree, text, 0, -1) do
+          found = found or (q.captures[id] == capture and vim.treesitter.get_node_text(n, text) == (file == 'textobjects' and 'g!(x)' or 'g'))
+        end
+        assert(found, 'lost exact successor call capture ' .. file)
+      end
+    end
+  end, book(spec[1]:sub(1, 3) .. spec[2]) }
+end
+positives[#positives + 1] = { 'zero literal successor identity binding', source(
+  'type Nat is Data: Zero{} Succ{p: Nat}\ndef boundary(x: Nat) -> Nat: 0n+0n = x; x'), function(tree, text)
+    local query = vim.treesitter.query.parse('bend2', '(let_expression pattern: (binding) @pattern)')
+    local values = {}
+    for _, n in query:iter_captures(tree, text, 0, -1) do values[#values + 1] = vim.treesitter.get_node_text(n, text) end
+    assert(vim.deep_equal(values, { '0n+0n' }), 'lost zero identity binding field/range')
+  end, source('type Nat is Data: Zero{} Succ{p: Nat}\ndef boundary(x: Nat) -> Nat: 0n = x; x') }
+positives[#positives + 1] = { 'array constructor type ownership', source('def boundary(x: Nat) -> Nat: [x: K{} ^ 2]'),
+  function(tree, text)
+    local query = vim.treesitter.query.parse('bend2', '(array_expression type: (constructor_expression) @type)')
+    local values = {}
+    for _, n in query:iter_captures(tree, text, 0, -1) do values[#values + 1] = vim.treesitter.get_node_text(n, text) end
+    assert(vim.deep_equal(values, { 'K{}' }), 'lost real array constructor type/delimiters')
+  end, source('def boundary(x: Nat) -> Nat: [x: (K{}) ^ 2]') }
+for _, atom in ipairs({ '@a: Type -> a', '1n+x' }) do
+  negatives[#negatives + 1] = { 'array full-expression type steals size delimiter ' .. atom,
+    source('def boundary(x: Nat) -> Nat: [x: ' .. atom .. ' * 2n]'),
+    source('def boundary(x: Nat) -> Nat: [x: (' .. atom .. ') * 2n]') }
+end
+
 local suffix = '\ntype SyntaxAfter is Data: SyntaxAfter{}\n'
   .. 'law syntax_after_law: U32\ndef syntax_after() -> U32: 42\n'
 local function check_following(node, text, label)
@@ -404,10 +452,30 @@ for _, newline in ipairs({ { 'LF', '\n' }, { 'CRLF', '\r\n' } }) do
     return text:gsub('\n', newline[2])
   end
   for _, case in ipairs(positives) do
-    local label, text = case[1] .. ' ' .. newline[1], lines(case[2])
+    local label, text = case[1] .. ' ' .. newline[1], lines(case[2] .. (case[4] and suffix or ''))
     check(label, function()
       local expected = parse(text)
       assert(not expected:has_error(), label .. ': legal syntax rejected')
+      if type(case[3]) == 'function' then
+        case[3](expected, text)
+        check_following(expected, text, label)
+        local control = lines(case[4] .. suffix)
+        assert(not parse(control):has_error(), label .. ': invalid positive control')
+        local buf = vim.api.nvim_create_buf(false, true)
+        vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(control:sub(1, -2), '\n', { plain = true }))
+        local parser = vim.treesitter.get_parser(buf, 'bend2')
+        parser:parse()
+        for _ = 1, 3 do
+          edit(buf, control, text)
+          local changed = parser:parse()[1]:root()
+          assert(fingerprint(changed) == fingerprint(expected), label .. ': changed incremental ownership')
+          case[3](changed, text)
+          check_following(changed, text, label)
+          edit(buf, text, control)
+          assert(fingerprint(parser:parse()[1]:root()) == fingerprint(parse(control)), label .. ': positive control repair differs')
+        end
+        vim.api.nvim_buf_delete(buf, { force = true })
+      end
       if case[1]:find('successor comment operator', 1, true) then
         local query = vim.treesitter.query.parse('bend2', '(natural_successor value: (_) @operand)')
         local values = {}
