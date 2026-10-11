@@ -478,6 +478,19 @@ for _, ending in ipairs({ 'ordinary', 'decorated', 'EOF' }) do
       suffix = ending == 'EOF' and '\n' or (ending == 'decorated' and '\n@unsafe' .. definition_first or definition_first),
       orphan_eof = ending == 'EOF' })
 end
+for _, terminal in ipairs({
+  { 'String', 'U32', '"s"', 'string', { { 'string', '"s"', 0 } } },
+  { 'Nat', 'Nat', '0n+x', 'natural_successor', { { 'number', '0n', 0 }, { 'operator', '+', 2 }, { 'variable', 'x', 3 } } },
+  { 'Nat', 'Nat', '0n', 'natural', { { 'number', '0n', 0 } } },
+}) do
+  local header = 'def broken(x:' .. terminal[2] .. ') -> ' .. terminal[1] .. ':\n  '
+  local assignment = 'a:' .. terminal[2] .. '=x'
+  review_case('tight array typed assignment ' .. terminal[3], header .. '[' .. assignment .. '\n  ' .. terminal[3],
+    header .. assignment .. '\n  ' .. terminal[3],
+    { prefix = 'law after: U32\ndef before() -> U32: 1\n', suffix = '\ndef after(): 42\n',
+      retained_integer_function = 'def after(): 42', owned = true, damaged_line = '[' .. assignment,
+      terminal_expression = { terminal[3], terminal[4], terminal[5] } })
+end
 for _, successor in ipairs({ '1n+n', '0n+n' }) do
   for _, orphan in ipairs({ 'oops', '2', 'x y', '"hi"', "'a'" }) do
     for _, ending in ipairs({ 'ordinary', 'decorated', 'EOF' }) do
@@ -838,7 +851,8 @@ local function check_following_cases(node, text, label, expected, owner_column)
     local body = arm:field('body')[1]
     assert(body and vim.treesitter.get_node_text(body, text) == value,
       label .. ': changed following arm body ' .. pattern)
-    local first, last = source_range(text, 'case ' .. pattern .. ': ' .. value)
+    local first = source_range(text, 'case ' .. pattern .. ':')
+    local _, last = source_range(text, value, first + #('case ' .. pattern .. ':'))
     local pattern_start = first + 5
     local body_start = last - #value + 1
     check_range(arm, text, first, last, label .. ' following arm ' .. pattern)

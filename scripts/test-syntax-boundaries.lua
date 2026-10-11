@@ -479,6 +479,15 @@ for _, spec in ipairs({
     assert(vim.deep_equal(values, { 'x=>x' }), 'lambda operator stolen by block entry')
   end, source(spec[3]) }
 end
+for _, operand in ipairs({ 'x+1', 'x > 1' }) do
+  positives[#positives + 1] = { 'law constraint owns full operand ' .. operand,
+    source('law boundary:\n  for t:Type where 1n+' .. operand .. '\n  U32'), function(tree, text)
+      local query = vim.treesitter.query.parse('bend2', '(law_clause constraint: (natural_successor value: (_) @operand))')
+      local values = {}
+      for _, n in query:iter_captures(tree, text, 0, -1) do values[#values + 1] = vim.treesitter.get_node_text(n, text) end
+      assert(vim.deep_equal(values, { operand }), 'constraint operator or operand stolen by block entry')
+    end, source('law boundary:\n  for t:Type where (1n+' .. operand .. ')\n  U32') }
+end
 negatives[#negatives + 1] = { 'law trailing successor operand operator',
   source('type T<q> is Data: K{}\nlaw boundary:\n  for v:1n+v+\n  T'),
   source('type T<q> is Data: K{}\nlaw boundary:\n  for v:1n+v\n  T') }
