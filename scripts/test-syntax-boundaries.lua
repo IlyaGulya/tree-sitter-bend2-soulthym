@@ -494,6 +494,36 @@ negatives[#negatives + 1] = { 'law trailing successor operand operator',
 positives[#positives + 1] = { 'law reusable next-line body remains separate',
   source('type T<q> is Data: K{}\nlaw boundary:\n  for v:1n+v\n  +T') }
 
+negatives[#negatives + 1] = { 'hybrid missing law body retains header',
+  source('law boundary: for v:T\n>1'), source('law boundary: for v:T\n1'), function(tree, text)
+    local query = vim.treesitter.query.parse('bend2', '(law_definition name: (identifier) @name (law_clause name: (identifier) @parameter type: (_) @type))')
+    local values = {}
+    for id, n in query:iter_captures(tree, text, 0, -1) do
+      assert(not n:has_error(), 'law recovery corrupts its intact header')
+      values[query.captures[id]] = vim.treesitter.get_node_text(n, text)
+    end
+    assert(vim.deep_equal(values, { name = 'boundary', parameter = 'v', type = 'T' }), 'edited law header lost')
+  end }
+for _, spec in ipairs({
+  { 'law', 'law boundary: for v:g-!(x)\nT', 'law boundary: for v:g!(x)\nT' },
+  { 'rewrite', 'def boundary()->T: %e:g-!(x);x', 'def boundary()->T: %e:g!(x);x' },
+}) do
+  negatives[#negatives + 1] = { 'hybrid real GPU recovery ' .. spec[1], source(spec[2]), source(spec[3]), function(tree, text)
+    local query = vim.treesitter.query.parse('bend2', '(call_expression function: (identifier) @callee arguments: (arguments (gpu_call) @gpu) @arguments)')
+    local values = {}
+    for id, n in query:iter_captures(tree, text, 0, -1) do
+      local capture = query.captures[id]
+      values[capture] = vim.treesitter.get_node_text(n, text)
+      if capture == 'arguments' then
+        local closer
+        for child in n:iter_children() do if child:type() == ')' and not child:missing() then closer = child end end
+        assert(closer, 'real GPU closer no longer belongs to arguments')
+      end
+    end
+    assert(vim.deep_equal(values, { callee = 'g', gpu = '!(', arguments = '!(x)' }), 'GPU call/delimiter ownership lost')
+  end }
+end
+
 local suffix = '\ntype SyntaxAfter is Data: SyntaxAfter{}\n'
   .. 'law syntax_after_law: U32\ndef syntax_after() -> U32: 42\n'
 local function check_following(node, text, label)
