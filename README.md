@@ -260,6 +260,21 @@ following declarations. Five such probes verify repair and incremental
 consistency, not highlight preservation for those arms. Fixing the original
 syntax error restores the complete tree.
 
+### Experimental successor/GPU recovery comparison
+
+This separate experimental branch preserves the atomic GPU call as a glued
+successor's actual `value` after an invalid `+`/`-`, instead of recovering the
+successor as the call's callee. All **1,172** qualified successor cases pass;
+valid syntax, public schema and all 1,644 upstream CSTs are unchanged against the
+#1/#3 base. This is not a confirmed addition to that base branch.
+
+The same-flag compiled library is **23.25% larger** (+844 KiB). Five alternating
+full-upstream timing pairs have overlapping ranges (medians 3.541 s / 3.518 s);
+there is no demonstrated speed improvement or universal performance claim.
+Ordinary function-body EOF combinations still have 32 inherited GPU-owner
+failures; neither this correction nor consistent edits makes those cases green.
+The known law and common recovery failures below also remain.
+
 ### Known nested-proof law recovery limit
 
 This PR branch includes fixes preserving a following law after a bad lambda

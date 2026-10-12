@@ -29,8 +29,8 @@ export default grammar({
     $._pattern_separator, $._successor_natural, $._zero_natural, $._natural_plus, $._amp, $._natural_successor_end, $.module_alias,
     $._body_entry, $._array_type_end, $._continuation_entry, $._header_checkpoint, $._case_pattern_end, $._case_header_start, $._root_layout, $._arm_end, $._block_end, $._lambda_end, $._group_start, $._group_end, $._function_match_start, $._function_match_end, $._function_case_word, $._arm_match_start, $._arm_match_end, $._arm_case_word, $._block_match_start, $._block_match_end, $._block_case_word, $._lambda_match_start, $._lambda_match_end, $._lambda_case_word, $._array_layout,
   ],
-  // Keep atomic callers available through infix shifts only in block headers.
-  // Other expression contexts retain their ordinary reductions.
+  // Keep atomic callers available through infix shifts in block headers and
+  // full successor operands. Other contexts retain their ordinary reductions.
   inline: $ => [$._header_expression, $._natural, $._array_terminal_atom],
   conflicts: $ => [
     [$._plain_lambda_match, $._owned_lambda_match],
@@ -279,9 +279,13 @@ export default grammar({
     builtin_type: $ => choice('Type', 'Data', 'Quant'),
     kind_expression: $ => seq('Kind', '(', $._expression, ')'),
     quantity: $ => token(seq('&', /[012]/)),
+    // parse_term_num consumes a full parse_term operand, including its atomic
+    // postfix caller. Retain that caller through native infix recovery too.
     natural_successor: $ => prec.right(-1, choice(
-      seq($._zero_successor_prefix, field('value', $._expression), optional($._natural_successor_end)),
-      seq($._nonzero_successor_prefix, field('value', $._expression), optional($._natural_successor_end)))),
+      seq($._zero_successor_prefix, field('value', $._successor_value), optional($._natural_successor_end)),
+      seq($._nonzero_successor_prefix, field('value', $._successor_value), optional($._natural_successor_end)))),
+    // Summarize only a consumed full operand; -1 keeps every infix inside it.
+    _successor_value: $ => prec.right(-1, $._header_expression),
     character: $ => seq("'", choice($.escape_sequence, token.immediate(prec(1, /[^\\]/u))), token.immediate("'")),
     string: $ => seq(alias($._string_start, '"'),
       repeat(choice($.escape_sequence, $.string_content, alias($._string_newline, $.string_content))), token.immediate('"')),

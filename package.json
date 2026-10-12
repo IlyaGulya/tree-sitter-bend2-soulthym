@@ -67,7 +67,7 @@
     "test:offline": "npm test && npm run test:scanner && npm run test:upgrade && npm run test:syntax && npm run test:neovim && npm run test:gpu && npm run test:missing-bodies && npm run test:rewrite-recovery && npm run test:recovery && npm run test:docs && npm run test:stdlib && npm run test:upstream && npm run test:release",
     "test:neovim": "tree-sitter build -o build/bend2.so && nvim --headless -u NONE -l scripts/test-neovim.lua",
     "test:upstream": "node scripts/validate-upstream.mjs",
-    "test:gpu": "tree-sitter build -o build/bend2.so && nvim --headless -u NONE -l scripts/test-gpu-recovery.lua && nvim --headless -u NONE -l scripts/test-gpu-owners.lua",
+    "test:gpu": "tree-sitter build -o build/bend2.so && nvim --headless -u NONE -l scripts/test-gpu-recovery.lua && nvim --headless -u NONE -l scripts/test-gpu-owners.lua && nvim --headless -u NONE -l scripts/test-successor-gpu.lua",
     "test:recovery": "tree-sitter build -o build/bend2.so && nvim --headless -u NONE -l scripts/test-recovery.lua",
     "test:docs": "tree-sitter build -o build/bend2.so && nvim --headless -u NONE -l scripts/test-docs.lua",
     "test:missing-bodies": "tree-sitter build -o build/bend2.so && nvim --headless -u NONE -l scripts/test-missing-bodies.lua",

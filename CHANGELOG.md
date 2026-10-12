@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Experimental successor/GPU comparison branch: retain the full successor
+  operand's atomic call through native infix errors, with 1,172 exact ownership
+  tests and real byte-edit repairs. No public schema/scanner-state change;
+  compiled-library cost +23.25%. Not yet confirmed for the #1/#3 base branch.
+
 - Preserve the next law after a malformed lambda rewrite proof and the actual
   outer-law terminal body/rewrite scope after a bad let value. Add the full
   strict40 next-law/40 law-body/eight scope/four missing-body guard matrix.
