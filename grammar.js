@@ -320,13 +320,14 @@ export default grammar({
     // Recovery can then retain the motive's actual atomic caller and arguments.
     _rewrite_prefix: $ => seq('%', optional(seq(field('name', $.identifier), alias($._at, '@'))),
       field('proof', $._expression), ':'),
-    // Reduce the consumed motive/separator before the mandatory block, as
-    // for other headers. EOF recovery then compares this actual header owner.
-    _rewrite_header: $ => seq($._rewrite_prefix, field('motive', $._header_expression), optional(';')),
+    // Commit the consumed proof/colon before lexing its required motive.
+    // Keep the separator in its caller so a rejected let can restart there.
+    _rewrite_header: $ => seq($._rewrite_prefix, $._body_entry, field('motive', $._header_expression)),
     // Keep the pre-entry header above: an invalid separator has no block yet.
-    // Once entered, summarize its actual checkpoints before the required value.
+    // With no separator, summarize actual entry before the still-required value.
     _rewrite_body_header: $ => seq($._rewrite_header, $._block_start, $._body_entry),
-    rewrite_expression: $ => prec.right(-2, seq($._rewrite_body_header, field('body', $._block_value))),
+    rewrite_expression: $ => prec.right(-2, choice(seq($._rewrite_body_header, field('body', $._block_value)),
+      seq($._rewrite_header, ';', $._block_start, $._body_entry, field('body', $._block_value)))),
     eliminator: $ => seq('\\', '{', repeat($.eliminator_arm), optional(seq(field('fallback', $._expression), optional(';'))), '}'),
     eliminator_arm: $ => seq(field('name', $.identifier), ':', field('value', $._expression), optional(';')),
     parenthesized_expression: $ => seq($._group_open, field('body', $.body),
