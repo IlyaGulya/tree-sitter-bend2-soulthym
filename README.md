@@ -95,7 +95,12 @@ On the integrated parser, using the existing 10-second per-file deadline:
   and body/capture boundaries before trailing comments. Standalone C tests
   exercise scanner serialization, full-width columns, all frame kinds, capacity
   and truncated states.
-- The strict full offline gate passes with no timeout exemptions.
+- **This PR branch's strict offline gate is currently red.** The rewrite-owner
+  suite passes **108/136** cases; its **28** failures exercise the documented
+  [nested-proof law recovery limitation](#known-nested-proof-law-recovery-limit).
+  The common recovery suite separately passes **539/551** cases, with **12**
+  existing nested-match/transfer/tight-array failures. These are not exemptions
+  or successful ownership checks. The remaining component gates pass.
   The suite also includes negative tests beyond the official Bend examples.
   The 2.6 MB `generics_3200/main.bend` parsed in **3.65 seconds** and
   the 5.7 MB `proofs_3200/main.bend` in **5.30 seconds**, under the unchanged
@@ -254,6 +259,39 @@ absorbed into an error region, and complicated combinations can also affect
 following declarations. Five such probes verify repair and incremental
 consistency, not highlight preservation for those arms. Fixing the original
 syntax error restores the complete tree.
+
+### Known nested-proof law recovery limit
+
+This PR branch includes fixes preserving a following law after a bad lambda
+rewrite proof, and preserving the enclosing law's real terminal body and retained
+function rewrite scope after a bad let value. The repository's strict
+[`test-rewrite-recovery.lua`](scripts/test-rewrite-recovery.lua) includes all
+**40** next-law and **40** law-body variants, **eight** function-scope variants
+and **four** missing-body/following-type guards, alongside the original cases.
+They cover LF/CRLF, literal EOF/final LF, fields/ranges/seven query groups and
+three minimal buffer break/repair cycles where the buffer has a final LF.
+Neovim buffers add a virtual LF; exact no-final-LF checks use string parsing,
+not a claim that those buffers have literal EOF.
+
+**Nested invalid rewrite proofs can still destroy their enclosing law owner:**
+
+```bend
+law b:for v:%$:%f:T;0;0
+T
+```
+
+Replacing only `$` with `e` repairs the syntax. On the damaged input, the inner
+`%f:T;0` survives, but the enclosing `law_definition b` becomes `ERROR` and the
+final `T` loses its law-body field and associated captures. This is a known
+recovery defect, not intended syntax, successful error localization or evidence
+that consumers should discard every declaration containing an error.
+
+The suite retains **24** nested-proof matrix cases plus **four** original cases
+as strict failures; it does not skip them or bless the damaged tree. Tested
+alternatives restore those owners but lose missing-body law wrappers or borrow
+outer bodies after bad lets. They are not included. The limitation is documented
+pending a safe shared recovery design; repairing the source restores the tree.
+See the [recovery policy](docs/recovery-policy.md#known-nested-proof-law-limitation).
 
 ### Boundaries and remaining limitations
 

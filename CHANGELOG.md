@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Preserve the next law after a malformed lambda rewrite proof and the actual
+  outer-law terminal body/rewrite scope after a bad let value. Add the full
+  strict40 next-law/40 law-body/eight scope/four missing-body guard matrix.
+- Document the still-unresolved nested-proof law recovery defect: its completed
+  inner rewrite survives, but the law wrapper/terminal body can be lost. Keep
+  its28 regressions red; the strict offline gate is not claimed green. See
+  [known limits](README.md#known-nested-proof-law-recovery-limit).
+
 - Restore comma-free string patterns and contextual infix `&` without changing
   quantity syntax. Preserve following declarations after parallel/array damage,
   grouped-pattern siblings and intact literal continuations. Reject invalid
