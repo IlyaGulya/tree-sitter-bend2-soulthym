@@ -50,6 +50,9 @@ installed main-branch nvim-treesitter checkout; set `BEND2_NVIM_TREESITTER` to i
 path if it is not under `stdpath('data') .. '/lazy/nvim-treesitter'`.
 `test:bindings` retains the scaffold's Node binding test, requiring its npm
 dependencies to be installed separately.
+The Go binding requires Go **1.23+** and `go-tree-sitter v0.25.0` for grammar
+ABI 15. Run `go test ./bindings/go`; this loads the grammar into an actual parser
+and parses a valid program, rather than only constructing a language object.
 
 ### Validation results
 
@@ -260,13 +263,13 @@ following declarations. Five such probes verify repair and incremental
 consistency, not highlight preservation for those arms. Fixing the original
 syntax error restores the complete tree.
 
-### Experimental successor/GPU recovery comparison
+### Successor/GPU recovery scope and cost
 
-This separate experimental branch preserves the atomic GPU call as a glued
+This PR branch preserves the atomic GPU call as a glued
 successor's actual `value` after an invalid `+`/`-`, instead of recovering the
 successor as the call's callee. All **1,172** qualified successor cases pass;
 valid syntax, public schema and all 1,644 upstream CSTs are unchanged against the
-#1/#3 base. This is not a confirmed addition to that base branch.
+#1/#3 comparison base.
 
 The same-flag compiled library is **23.25% larger** (+844 KiB). Five alternating
 full-upstream timing pairs have overlapping ranges (medians 3.541 s / 3.518 s);

@@ -2,10 +2,12 @@
 
 ## Unreleased
 
-- Experimental successor/GPU comparison branch: retain the full successor
-  operand's atomic call through native infix errors, with 1,172 exact ownership
-  tests and real byte-edit repairs. No public schema/scanner-state change;
-  compiled-library cost +23.25%. Not yet confirmed for the #1/#3 base branch.
+- Upgrade the Go runtime binding to `go-tree-sitter v0.25.0` for ABI 15 and
+  require Go 1.23+. Commit module checksums and test actual parser loading plus
+  valid source parsing; the old language-object-only test missed incompatibility.
+- Retain the full successor operand's atomic GPU call through native infix
+  errors, with 1,172 exact ownership tests and real byte-edit repairs. No public
+  schema/scanner-state change; compiled-library cost +23.25%.
 
 - Preserve the next law after a malformed lambda rewrite proof and the actual
   outer-law terminal body/rewrite scope after a bad let value. Add the full
